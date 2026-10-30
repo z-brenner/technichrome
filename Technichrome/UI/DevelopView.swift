@@ -73,7 +73,7 @@ struct DevelopView: View {
             Spacer()
             VStack(spacing: 3) {
                 Wordmark(size: 12)
-                TCLabel(record.rawKind == .none ? "developed from heif" : "developed from \(record.rawKind.rawValue)", size: 9)
+                TCLabel(record.rawKind == .none ? "developed without raw" : "developed from \(record.rawKind.rawValue)", size: 9)
             }
             Spacer()
             Color.clear.frame(width: 44, height: 44)

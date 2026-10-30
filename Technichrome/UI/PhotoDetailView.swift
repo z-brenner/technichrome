@@ -83,7 +83,7 @@ struct PhotoDetailView: View {
 
     private var infoPanel: some View {
         VStack(alignment: .leading, spacing: 6) {
-            row("Source", record.rawKind == .none ? "HEIF (no RAW available)" : "\(record.rawKind.rawValue) · \(record.pixelWidth)×\(record.pixelHeight)")
+            row("Source", record.rawKind == .none ? "No RAW (display-referred image)" : "\(record.rawKind.rawValue) · \(record.pixelWidth)×\(record.pixelHeight)")
             row("Camera", record.cameraModel ?? "—")
             if let iso = record.iso, let t = record.exposureDuration {
                 row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), record.exposureBias))
