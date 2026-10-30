@@ -339,7 +339,8 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         if let old = subjectAreaObserver { NotificationCenter.default.removeObserver(old) }
         subjectAreaObserver = NotificationCenter.default.addObserver(forName: .AVCaptureDeviceSubjectAreaDidChange, object: dev, queue: nil) { [weak self] _ in
             guard let self else { return }
-            self.queue.async { if !self.locked { self.resetFocus() } }
+            // Check and reset in one queue operation, so a lock requested in between cannot be undone.
+            self.queue.async { if !self.locked { self.resetFocusNow() } }
         }
         let input = try AVCaptureDeviceInput(device: dev)
         guard session.canAddInput(input) else { throw CameraError.configurationFailed("cannot add camera input") }
@@ -548,17 +549,20 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     }
 
     func resetFocus() {
-        queue.async { [self] in
-            guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
-            locked = false
-            let centre = CGPoint(x: 0.5, y: 0.5)
-            if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = centre }
-            if dev.isFocusModeSupported(.continuousAutoFocus) { dev.focusMode = .continuousAutoFocus }
-            if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = centre }
-            if dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
-            dev.isSubjectAreaChangeMonitoringEnabled = false
-            dev.unlockForConfiguration()
-        }
+        queue.async { [self] in resetFocusNow() }
+    }
+
+    /// Continuous focus and exposure at the centre; releases any lock. Runs on `queue`.
+    private func resetFocusNow() {
+        guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
+        locked = false
+        let centre = CGPoint(x: 0.5, y: 0.5)
+        if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = centre }
+        if dev.isFocusModeSupported(.continuousAutoFocus) { dev.focusMode = .continuousAutoFocus }
+        if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = centre }
+        if dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
+        dev.isSubjectAreaChangeMonitoringEnabled = false
+        dev.unlockForConfiguration()
     }
 
     func setExposureBias(_ ev: Float) {
