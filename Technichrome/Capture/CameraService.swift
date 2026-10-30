@@ -67,6 +67,14 @@ public enum CameraError: Error, LocalizedError {
     }
 }
 
+/// One thing the camera system reported about the current lens, shown in Settings so a first run on
+/// real hardware can be checked against the README's list of untested items.
+public struct CaptureFact: Identifiable, Sendable, Equatable {
+    public let label: String
+    public let value: String
+    public var id: String { label }
+}
+
 /// State the core reports back after (re)configuration.
 struct CaptureConfiguration: Sendable {
     var rawKind: RAWKind
@@ -74,6 +82,7 @@ struct CaptureConfiguration: Sendable {
     var zoomLabel: String
     /// "0.5×", "1×", "2×"… per available lens, from the fields of view.
     var lensLabels: [Lens: String] = [:]
+    var facts: [CaptureFact] = []
 }
 
 @MainActor
@@ -90,6 +99,8 @@ public final class CameraService {
     public private(set) var lastError: String?
     public private(set) var zoomLabel: String = "1×"
     public private(set) var lensLabels: [Lens: String] = [:]
+    /// What AVFoundation reported for the current lens (formats, RAW, colour space, controls).
+    public private(set) var facts: [CaptureFact] = []
     /// Whether to also request Apple's processed HEIF alongside the RAW (for the comparison view).
     public var captureCompanionHEIF = true
 
@@ -149,6 +160,7 @@ public final class CameraService {
         availableLenses = c.availableLenses
         zoomLabel = c.zoomLabel
         lensLabels = c.lensLabels
+        facts = c.facts
     }
 
     // MARK: - Controls
@@ -391,6 +403,52 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         } else {
             lastConfiguration.rawKind = .none
         }
+        lastConfiguration.facts = collectFacts()
+    }
+
+    /// What the camera system says about the current lens, for the Settings screen.
+    private func collectFacts() -> [CaptureFact] {
+        guard let dev = device else { return [] }
+        var facts: [CaptureFact] = []
+        func add(_ label: String, _ value: String) { facts.append(CaptureFact(label: label, value: value)) }
+        func fourCC(_ t: OSType) -> String {
+            let bytes = [UInt8((t >> 24) & 0xFF), UInt8((t >> 16) & 0xFF), UInt8((t >> 8) & 0xFF), UInt8(t & 0xFF)]
+            return String(bytes: bytes, encoding: .ascii)?.trimmingCharacters(in: .whitespaces) ?? String(t)
+        }
+        func dims(_ d: CMVideoDimensions) -> String { "\(d.width)×\(d.height)" }
+        add("Camera", dev.localizedName)
+        let fd = CMVideoFormatDescriptionGetDimensions(dev.activeFormat.formatDescription)
+        add("Active format", "\(dims(fd)) video")
+        add("Photo sizes", dev.activeFormat.supportedMaxPhotoDimensions.map(dims).joined(separator: ", "))
+        add("Max photo", dims(photoOutput.maxPhotoDimensions))
+        let raw = photoOutput.availableRawPhotoPixelFormatTypes
+        if raw.isEmpty {
+            add("RAW formats", "none")
+        } else {
+            add("RAW formats", raw.map { t in
+                let kind = AVCapturePhotoOutput.isBayerRAWPixelFormat(t) ? "Bayer" : (AVCapturePhotoOutput.isAppleProRAWPixelFormat(t) ? "ProRAW" : "other")
+                return "\(fourCC(t)) (\(kind))"
+            }.joined(separator: ", "))
+        }
+        add("Apple ProRAW", photoOutput.isAppleProRAWSupported ? (photoOutput.isAppleProRAWEnabled ? "supported, enabled" : "supported, off") : "not supported")
+        add("ISO range", String(format: "%.0f–%.0f", dev.activeFormat.minISO, dev.activeFormat.maxISO))
+        add("Bias range", String(format: "%+.1f…%+.1f EV", dev.minExposureTargetBias, dev.maxExposureTargetBias))
+        add("Zoom factor", String(format: "%.2f", dev.videoZoomFactor))
+        let space: String
+        switch dev.activeColorSpace {
+        case .sRGB: space = "sRGB"
+        case .P3_D65: space = "P3 D65"
+        case .HLG_BT2020: space = "HLG BT.2020"
+        default: space = "other"
+        }
+        add("Preview colour space", space)
+        add("Video HDR", dev.activeFormat.isVideoHDRSupported ? (dev.isVideoHDREnabled ? "on" : "off") : "not supported")
+        if #available(iOS 18.0, *) {
+            add("Camera Control", session.supportsControls ? "present, \(session.controls.count) controls" : "none")
+        } else {
+            add("Camera Control", "needs iOS 18")
+        }
+        return facts
     }
 
     private static func zoomLabel(for lens: Lens, devices: [AVCaptureDevice]) -> String {

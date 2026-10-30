@@ -6,6 +6,8 @@ filter: separation negatives, gelatin matrices, three dyes, a silver key, a carb
 
 * `docs/COLOR_SCIENCE.md` — the rendering model, what is historically documented and what is our approximation, and how to keep refining it.
 * `docs/RAW_PIPELINE.md` — Bayer RAW versus Apple ProRAW, what the decoder is allowed to do, capture policy, limits.
+* `docs/HARDWARE_CHECKLIST.md` — what to check, in order, on the first run on a real iPhone, and what to report back.
+* `CHANGELOG.md` — what each round of work added.
 
 ## What it does
 
