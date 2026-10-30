@@ -33,6 +33,7 @@ final class AppModel {
         didSet {
             settings.save()
             camera.captureCompanionHEIF = settings.captureCompanionHEIF
+            camera.fullResolutionRAW = settings.fullResolutionRAW
         }
     }
 
@@ -54,6 +55,7 @@ final class AppModel {
             parameters = .default
         }
         camera.captureCompanionHEIF = settings.captureCompanionHEIF
+        camera.fullResolutionRAW = settings.fullResolutionRAW
     }
 
     func saveParametersAsDefault(_ p: EngineParameters) {
@@ -70,8 +72,20 @@ final class AppModel {
 struct AppSettings: Codable, Equatable {
     var captureCompanionHEIF = true
     var saveRAWWithPrint = true
+    /// Ask the camera for its largest photo size (48 MP where offered) rather than 12 MP.
+    var fullResolutionRAW = false
 
     private static let key = "technichrome.settings.v1"
+
+    init() {}
+
+    /// Tolerant decoding: a setting added later must not reset the ones already saved.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        captureCompanionHEIF = try c.decodeIfPresent(Bool.self, forKey: .captureCompanionHEIF) ?? true
+        saveRAWWithPrint = try c.decodeIfPresent(Bool.self, forKey: .saveRAWWithPrint) ?? true
+        fullResolutionRAW = try c.decodeIfPresent(Bool.self, forKey: .fullResolutionRAW) ?? false
+    }
 
     static func load() -> AppSettings {
         if let data = UserDefaults.standard.data(forKey: key), let s = try? JSONDecoder().decode(AppSettings.self, from: data) {

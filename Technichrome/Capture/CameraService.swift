@@ -101,8 +101,18 @@ public final class CameraService {
     public private(set) var lensLabels: [Lens: String] = [:]
     /// What AVFoundation reported for the current lens (formats, RAW, colour space, controls).
     public private(set) var facts: [CaptureFact] = []
+    /// AE/AF lock (long press on the preview): focus and exposure hold until the next tap.
+    public private(set) var isExposureFocusLocked = false
     /// Whether to also request Apple's processed HEIF alongside the RAW (for the comparison view).
     public var captureCompanionHEIF = true
+    /// Request the largest photo size the format offers (48 MP on recent main cameras) instead of 12 MP.
+    public var fullResolutionRAW = false {
+        didSet {
+            guard fullResolutionRAW != oldValue else { return }
+            core.preferFullResolution = fullResolutionRAW
+            if isConfigured { reconfigureCurrentLens() }
+        }
+    }
 
     @ObservationIgnored private let core = CaptureCore()
 
@@ -168,6 +178,7 @@ public final class CameraService {
     public func switchLens(_ lens: Lens) {
         guard lens != currentLens else { return }
         currentLens = lens
+        isExposureFocusLocked = false     // the new camera starts in continuous focus and exposure
         Task {
             do {
                 let config = try await core.reconfigure(lens: lens)
@@ -178,9 +189,34 @@ public final class CameraService {
         }
     }
 
+    private func reconfigureCurrentLens() {
+        isExposureFocusLocked = false     // configureSession restores continuous focus and exposure
+        Task {
+            do {
+                let config = try await core.reconfigure(lens: currentLens)
+                apply(config)
+            } catch {
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
     /// Focus and expose at a point in device coordinates (0…1, origin top-left, landscape sensor frame).
-    public func focus(atDevicePoint p: CGPoint) { core.focus(at: p) }
-    public func resetFocus() { core.resetFocus() }
+    public func focus(atDevicePoint p: CGPoint) {
+        isExposureFocusLocked = false
+        core.focus(at: p)
+    }
+
+    public func resetFocus() {
+        isExposureFocusLocked = false
+        core.resetFocus()
+    }
+
+    /// AE/AF lock at a point: one focus and exposure run, then both hold until `focus` or `resetFocus`.
+    public func lockExposureAndFocus(atDevicePoint p: CGPoint) {
+        isExposureFocusLocked = true
+        core.lock(at: p)
+    }
 
     public func setExposureBias(_ ev: Float) {
         let clamped = max(-3, min(3, ev))
@@ -221,6 +257,10 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     private var lensControl: AnyObject?
     private var controlLenses: [Lens] = []
     private var currentBias: Float = 0
+    /// Set from the main actor, read on the session queue at configuration time (a benign race for a Bool).
+    var preferFullResolution = false
+    private var locked = false
+    private var subjectAreaObserver: NSObjectProtocol?
     /// Called (on the session queue) when the hardware controls change a value.
     var exposureBiasFromControl: (@Sendable (Float) -> Void)?
     var lensFromControl: (@Sendable (Lens) -> Void)?
@@ -254,17 +294,20 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
     }
 
+    /// Rebuilds the session for a lens or a photo-size change. A session that was stopped (the camera view
+    /// is away) stays stopped: the next `start` runs it with the new configuration.
     func reconfigure(lens: Lens) async throws -> CaptureConfiguration {
         try await withCheckedThrowingContinuation { cont in
             queue.async { [self] in
                 do {
+                    let wasRunning = session.isRunning
                     session.beginConfiguration()
                     if let old = videoInput { session.removeInput(old); videoInput = nil }
                     configured = false
                     session.commitConfiguration()
                     try configureSession(lens: lens)
                     applyRAWPolicy()
-                    if !session.isRunning { session.startRunning() }
+                    if wasRunning, !session.isRunning { session.startRunning() }
                     cont.resume(returning: lastConfiguration)
                 } catch {
                     cont.resume(throwing: error)
@@ -294,6 +337,14 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
             throw CameraError.noCamera
         }
         device = dev
+        locked = false                    // the device below is put into continuous focus and exposure
+        // A change of subject (the user recomposed) returns a tapped focus to continuous mode, unless locked.
+        if let old = subjectAreaObserver { NotificationCenter.default.removeObserver(old) }
+        subjectAreaObserver = NotificationCenter.default.addObserver(forName: .AVCaptureDeviceSubjectAreaDidChange, object: dev, queue: nil) { [weak self] _ in
+            guard let self else { return }
+            // Check and reset in one queue operation, so a lock requested in between cannot be undone.
+            self.queue.async { if !self.locked { self.resetFocusNow() } }
+        }
         let input = try AVCaptureDeviceInput(device: dev)
         guard session.canAddInput(input) else { throw CameraError.configurationFailed("cannot add camera input") }
         session.addInput(input)
@@ -304,8 +355,8 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
             session.addOutput(photoOutput)
         }
         photoOutput.maxPhotoQualityPrioritization = .quality
-        if let largest = dev.activeFormat.supportedMaxPhotoDimensions.last {
-            photoOutput.maxPhotoDimensions = largest
+        if let chosen = Self.photoDimensions(for: dev.activeFormat, fullResolution: preferFullResolution) {
+            photoOutput.maxPhotoDimensions = chosen
         }
 
         if !session.outputs.contains(videoOutput) {
@@ -451,6 +502,15 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         return facts
     }
 
+    /// 12 MP by default — the size every lens offers to Bayer RAW and the binned readout of 48 MP sensors —
+    /// or the largest size the format offers when full resolution is requested.
+    static func photoDimensions(for format: AVCaptureDevice.Format, fullResolution: Bool) -> CMVideoDimensions? {
+        let sizes = format.supportedMaxPhotoDimensions.sorted { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }
+        guard let largest = sizes.last else { return nil }
+        if fullResolution { return largest }
+        return sizes.first { Int($0.width) * Int($0.height) >= 11_000_000 } ?? largest
+    }
+
     private static func zoomLabel(for lens: Lens, devices: [AVCaptureDevice]) -> String {
         guard let wide = devices.first(where: { $0.deviceType == .builtInWideAngleCamera }),
               let dev = devices.first(where: { $0.deviceType == lens.deviceType }) else { return "1×" }
@@ -467,6 +527,7 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     func focus(at p: CGPoint) {
         queue.async { [self] in
             guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
+            locked = false
             if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = p; dev.focusMode = .autoFocus }
             if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = p; dev.exposureMode = .continuousAutoExposure }
             dev.isSubjectAreaChangeMonitoringEnabled = true
@@ -474,16 +535,37 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
     }
 
-    func resetFocus() {
+    /// AE/AF lock: one focus run and one exposure run at the point, after which the device holds both
+    /// (`.autoFocus` and `.autoExpose` revert to `.locked` when they finish). Subject-area monitoring is
+    /// off so nothing but the user unlocks it.
+    func lock(at p: CGPoint) {
         queue.async { [self] in
             guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
-            let centre = CGPoint(x: 0.5, y: 0.5)
-            if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = centre }
-            if dev.isFocusModeSupported(.continuousAutoFocus) { dev.focusMode = .continuousAutoFocus }
-            if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = centre }
-            if dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
+            locked = true
+            if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = p }
+            if dev.isFocusModeSupported(.autoFocus) { dev.focusMode = .autoFocus } else if dev.isFocusModeSupported(.locked) { dev.focusMode = .locked }
+            if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = p }
+            if dev.isExposureModeSupported(.autoExpose) { dev.exposureMode = .autoExpose } else if dev.isExposureModeSupported(.locked) { dev.exposureMode = .locked }
+            dev.isSubjectAreaChangeMonitoringEnabled = false
             dev.unlockForConfiguration()
         }
+    }
+
+    func resetFocus() {
+        queue.async { [self] in resetFocusNow() }
+    }
+
+    /// Continuous focus and exposure at the centre; releases any lock. Runs on `queue`.
+    private func resetFocusNow() {
+        guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
+        locked = false
+        let centre = CGPoint(x: 0.5, y: 0.5)
+        if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = centre }
+        if dev.isFocusModeSupported(.continuousAutoFocus) { dev.focusMode = .continuousAutoFocus }
+        if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = centre }
+        if dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
+        dev.isSubjectAreaChangeMonitoringEnabled = false
+        dev.unlockForConfiguration()
     }
 
     func setExposureBias(_ ev: Float) {

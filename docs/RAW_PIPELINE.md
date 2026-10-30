@@ -29,7 +29,10 @@ photos. They're still scene-referred"); WWDC21 session 10160.
    Only when none exists and `isAppleProRAWSupported` is true is `isAppleProRAWEnabled` switched on
    (before `startRunning()`, as Apple recommends) and the ProRAW format used.
 3. `videoZoomFactor` is pinned to 1.0 (Bayer RAW throws with digital zoom).
-4. `maxPhotoDimensions` is set to the largest value the active format supports.
+4. `maxPhotoDimensions` is set to the 12 MP size by default — the size every lens offers to Bayer RAW and the
+   binned readout of 48 MP sensors — or to the largest size the format offers when *Request full sensor
+   resolution* is on in Settings. Whether Bayer RAW is delivered at 48 MP, or only ProRAW and HEIF, is
+   untested; the Settings diagnostics show what was asked for.
 5. `AVCapturePhotoSettings(rawPixelFormatType:processedFormat:)` requests the RAW plus an HEVC companion.
    The companion is Apple's rendering; it is stored only so the Laboratory can compare the Technichrome
    print against it (hold the image). It never feeds the engine.
