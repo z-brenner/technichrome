@@ -233,7 +233,7 @@ struct LaboratoryView: View {
         busy = true
         Task.detached(priority: .userInitiated) {
             do {
-                let result = try await dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.printExposureEV)
+                let result = try dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.printExposureEV)
                 await MainActor.run {
                     var r = record
                     r.parameters = p; r.isDeveloped = true; r.baselineExposure = result.baselineExposure

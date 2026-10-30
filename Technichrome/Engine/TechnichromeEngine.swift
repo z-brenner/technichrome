@@ -54,9 +54,10 @@ public final class TechnichromeEngine: @unchecked Sendable {
     private let keyKernel: CIColorKernel
     private let printKernel: CIColorKernel
     private let linearViewKernel: CIColorKernel
+    private let pickChannelsKernel: CIColorKernel
 
     private let lutLock = NSLock()
-    private var lutCache: (parameters: EngineParameters, cube: Data, dimension: Int)?
+    private var lutCache: (key: PrintModelKey, cube: Data, dimension: Int)?
     public let lutDimension: Int
 
     public init(lutDimension: Int = 33) throws {
@@ -76,6 +77,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
         keyKernel = try load("tc_key")
         printKernel = try load("tc_print")
         linearViewKernel = try load("tc_linear_view")
+        pickChannelsKernel = try load("tc_pick_channels")
         self.lutDimension = lutDimension
     }
 
@@ -84,19 +86,15 @@ public final class TechnichromeEngine: @unchecked Sendable {
     /// Bakes (and caches) the dye cube for a parameter set. Only the print-model parameters matter
     /// for the cube, so edits to exposure/curves reuse the cached data.
     public func cubeData(for p: EngineParameters) -> (Data, Int) {
+        let key = PrintModelKey(p)
         lutLock.lock(); defer { lutLock.unlock() }
-        if let c = lutCache, Self.printModelEqual(c.parameters, p) {
+        if let c = lutCache, c.key == key {
             return (c.cube, c.dimension)
         }
         let lut = LUTBuilder.build(parameters: p, dimension: lutDimension, displaySpace: .displayP3)
         let data = lut.data.withUnsafeBufferPointer { Data(buffer: $0) }
-        lutCache = (p, data, lut.dimension)
+        lutCache = (key, data, lut.dimension)
         return (data, lut.dimension)
-    }
-
-    static func printModelEqual(_ a: EngineParameters, _ b: EngineParameters) -> Bool {
-        a.cyan == b.cyan && a.magenta == b.magenta && a.yellow == b.yellow && a.dyeDMax == b.dyeDMax
-            && a.printDMin == b.printDMin && a.projectorCCT == b.projectorCCT
     }
 
     // MARK: - Graph
@@ -160,7 +158,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
             }
             let shift = p.misregistration(longEdge: longEdge)
             if shift > 0.05 {
-                densities = Self.misregister(densities, by: shift, extent: extent)
+                densities = misregister(densities, by: shift, extent: extent)
             }
         }
 
@@ -184,26 +182,16 @@ public final class TechnichromeEngine: @unchecked Sendable {
         linearViewKernel.apply(extent: input.extent, arguments: [input, exposureScale]) ?? input
     }
 
-    /// Shifts the three dye images relative to each other (imperfect pin registration).
-    private static func misregister(_ densities: CIImage, by shift: Double, extent: CGRect) -> CIImage {
-        func channel(_ i: Int, dx: Double, dy: Double) -> CIImage {
-            let f = CIFilter.colorMatrix()
-            f.inputImage = densities
-            f.rVector = CIVector(x: i == 0 ? 1 : 0, y: 0, z: 0, w: 0)
-            f.gVector = CIVector(x: 0, y: i == 1 ? 1 : 0, z: 0, w: 0)
-            f.bVector = CIVector(x: 0, y: 0, z: i == 2 ? 1 : 0, w: 0)
-            f.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
-            let img = f.outputImage ?? densities
-            return img.clampedToExtent().transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: extent)
+    /// Shifts the three dye images relative to each other (imperfect pin registration): three shifted
+    /// copies of the density image, recombined channel-wise by a kernel so alpha is never summed.
+    private func misregister(_ densities: CIImage, by shift: Double, extent: CGRect) -> CIImage {
+        func shifted(dx: Double, dy: Double) -> CIImage {
+            densities.clampedToExtent().transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: extent)
         }
-        let c = channel(0, dx: shift, dy: 0)
-        let m = channel(1, dx: -0.5 * shift, dy: 0.866 * shift)
-        let y = channel(2, dx: -0.5 * shift, dy: -0.866 * shift)
-        let add1 = CIFilter.additionCompositing()
-        add1.inputImage = c; add1.backgroundImage = m
-        let add2 = CIFilter.additionCompositing()
-        add2.inputImage = add1.outputImage; add2.backgroundImage = y
-        return add2.outputImage ?? densities
+        let c = shifted(dx: shift, dy: 0)
+        let m = shifted(dx: -0.5 * shift, dy: 0.866 * shift)
+        let y = shifted(dx: -0.5 * shift, dy: -0.866 * shift)
+        return pickChannelsKernel.apply(extent: extent, arguments: [c, m, y]) ?? densities
     }
 }
 

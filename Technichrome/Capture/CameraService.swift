@@ -183,7 +183,12 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var inFlight: [Int64: PhotoCaptureProcessor] = [:]
     private var configured = false
+    private var lastConfiguration = CaptureConfiguration(rawKind: .none, availableLenses: [], zoomLabel: "1×")
     var frameHandler: (@Sendable (CVPixelBuffer) -> Void)?
+
+    /// How long a capture may take before the continuation is failed (keeps the shutter from locking up
+    /// if the delegate is never called).
+    private let captureTimeout: TimeInterval = 20
 
     // MARK: Lifecycle
 
@@ -191,9 +196,12 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         try await withCheckedThrowingContinuation { cont in
             queue.async { [self] in
                 do {
-                    let config = try configured ? currentConfiguration() : configureSession(lens: lens)
+                    if !configured {
+                        try configureSession(lens: lens)
+                        applyRAWPolicy()
+                    }
                     if !session.isRunning { session.startRunning() }
-                    cont.resume(returning: config)
+                    cont.resume(returning: lastConfiguration)
                 } catch {
                     cont.resume(throwing: error)
                 }
@@ -215,9 +223,10 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
                     if let old = videoInput { session.removeInput(old); videoInput = nil }
                     configured = false
                     session.commitConfiguration()
-                    let config = try configureSession(lens: lens)
+                    try configureSession(lens: lens)
+                    applyRAWPolicy()
                     if !session.isRunning { session.startRunning() }
-                    cont.resume(returning: config)
+                    cont.resume(returning: lastConfiguration)
                 } catch {
                     cont.resume(throwing: error)
                 }
@@ -225,10 +234,9 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
     }
 
-    private var lastConfiguration = CaptureConfiguration(rawKind: .none, availableLenses: [], zoomLabel: "1×")
-    private func currentConfiguration() -> CaptureConfiguration { lastConfiguration }
-
-    private func configureSession(lens: Lens) throws -> CaptureConfiguration {
+    /// Inputs, outputs and device settings. Committed before any RAW format is queried, because the
+    /// photo output only reports RAW formats once it is connected to a committed session.
+    private func configureSession(lens: Lens) throws {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.sessionPreset = .photo
@@ -258,19 +266,6 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
             photoOutput.maxPhotoDimensions = largest
         }
 
-        // RAW policy: Bayer first. Only enable ProRAW when the camera offers no Bayer format at all.
-        let rawKind: RAWKind
-        let hasBayer = photoOutput.availableRawPhotoPixelFormatTypes.contains { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }
-        if hasBayer {
-            rawKind = .bayer
-        } else if photoOutput.isAppleProRAWSupported {
-            photoOutput.isAppleProRAWEnabled = true
-            let hasProRAW = photoOutput.availableRawPhotoPixelFormatTypes.contains { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }
-            rawKind = hasProRAW ? .proRAW : .none
-        } else {
-            rawKind = .none
-        }
-
         if !session.outputs.contains(videoOutput) {
             videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
             videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -292,9 +287,24 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
 
         configured = true
-        lastConfiguration = CaptureConfiguration(rawKind: rawKind, availableLenses: lenses,
+        lastConfiguration = CaptureConfiguration(rawKind: .none, availableLenses: lenses,
                                                  zoomLabel: Self.zoomLabel(for: lens, devices: discovery.devices))
-        return lastConfiguration
+    }
+
+    /// RAW policy, decided after the configuration is committed: Bayer first; ProRAW only when the camera
+    /// offers no Bayer format at all (enabling ProRAW reconfigures the pipeline, so it happens before
+    /// `startRunning`, as Apple recommends).
+    private func applyRAWPolicy() {
+        let formats = photoOutput.availableRawPhotoPixelFormatTypes
+        if formats.contains(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) {
+            lastConfiguration.rawKind = .bayer
+        } else if photoOutput.isAppleProRAWSupported {
+            photoOutput.isAppleProRAWEnabled = true
+            let hasProRAW = photoOutput.availableRawPhotoPixelFormatTypes.contains { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }
+            lastConfiguration.rawKind = hasProRAW ? .proRAW : .none
+        } else {
+            lastConfiguration.rawKind = .none
+        }
     }
 
     private static func zoomLabel(for lens: Lens, devices: [AVCaptureDevice]) -> String {
@@ -377,6 +387,12 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
                     cont.resume(with: result)
                 }
                 inFlight[id] = processor
+                // Watchdog: a capture that never reports back must not leave the shutter locked.
+                queue.asyncAfter(deadline: .now() + captureTimeout) { [weak self, weak processor] in
+                    guard let self, let processor, self.inFlight[id] === processor else { return }
+                    self.inFlight[id] = nil
+                    processor.fail(CameraError.captureFailed("the camera did not deliver the photograph in time"))
+                }
                 photoOutput.capturePhoto(with: settings, delegate: processor)
             }
         }
@@ -390,12 +406,14 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     }
 }
 
-/// Collects the RAW and processed photos of one capture request.
+/// Collects the RAW and processed photos of one capture request. Completes exactly once.
 final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     private let kind: RAWKind
     private let lens: Lens
     private let bias: Float
     private let completion: (Result<CaptureResult, Error>) -> Void
+    private let lock = NSLock()
+    private var finished = false
     private var rawData: Data?
     private var processedData: Data?
     private var width = 0, height = 0
@@ -407,6 +425,16 @@ final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     init(kind: RAWKind, lens: Lens, bias: Float, completion: @escaping (Result<CaptureResult, Error>) -> Void) {
         self.kind = kind; self.lens = lens; self.bias = bias; self.completion = completion
     }
+
+    private func finish(_ result: Result<CaptureResult, Error>) {
+        lock.lock()
+        let already = finished
+        finished = true
+        lock.unlock()
+        if !already { completion(result) }
+    }
+
+    func fail(_ error: Error) { finish(.failure(error)) }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error { failure = error; return }
@@ -431,16 +459,16 @@ final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
         if let error = error ?? failure {
-            completion(.failure(CameraError.captureFailed(error.localizedDescription)))
+            finish(.failure(CameraError.captureFailed(error.localizedDescription)))
             return
         }
         guard rawData != nil || processedData != nil else {
-            completion(.failure(CameraError.captureFailed("no image data was delivered")))
+            finish(.failure(CameraError.captureFailed("no image data was delivered")))
             return
         }
         let result = CaptureResult(rawData: rawData, rawKind: rawData == nil ? .none : kind, processedData: processedData,
                                    pixelWidth: width, pixelHeight: height, lens: lens, exposureBias: bias,
                                    iso: iso, exposureDuration: duration, lensModel: lensModel, capturedAt: Date())
-        completion(.success(result))
+        finish(.success(result))
     }
 }

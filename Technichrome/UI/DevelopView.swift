@@ -163,7 +163,7 @@ struct DevelopView: View {
         stageImages = stages
         // Play the reveal while the full-resolution develop runs
         let full = Task.detached(priority: .userInitiated) { () throws -> DevelopedImage in
-            try await dev.developToDisk(record: rec, store: store, parameters: params, extraEV: rec.printExposureEV)
+            try dev.developToDisk(record: rec, store: store, parameters: params, extraEV: rec.printExposureEV)
         }
         for s in [Stage.yellow, .cyan, .magenta] {
             try? await Task.sleep(for: .milliseconds(520))

@@ -96,6 +96,13 @@ namespace coreimage {
         return float4(w, 1.0f);
     }
 
+    /// Recombines three differently shifted copies of the density image into one (imperfect pin
+    /// registration): cyan from the first, magenta from the second, yellow from the third. Alpha stays 1.
+    float4 tc_pick_channels(sample_t c, sample_t m, sample_t y)
+    {
+        return float4(c.r, m.g, y.b, 1.0f);
+    }
+
     /// Debug/compare view: scene-linear → working space with a plain exposure (no look).
     float4 tc_linear_view(sample_t src, float exposureScale)
     {

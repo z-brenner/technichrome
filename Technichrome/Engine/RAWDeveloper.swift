@@ -88,7 +88,6 @@ public final class RAWDeveloper {
         if f.isSharpnessSupported { f.sharpnessAmount = options.sharpness }
         if f.isDetailSupported { f.detailAmount = options.detail }
         if f.isLensCorrectionSupported { f.isLensCorrectionEnabled = options.lensCorrection }
-        if f.isHighlightRecoverySupported { f.isHighlightRecoveryEnabled = true }
         f.scaleFactor = options.scaleFactor
         f.isDraftModeEnabled = options.draftMode
         f.orientation = orientation

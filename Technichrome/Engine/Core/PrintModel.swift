@@ -10,6 +10,22 @@
 
 import Foundation
 
+/// Everything the print model (and therefore the baked dye cube) depends on. Keep this in step with
+/// `PrintModel.init` and `LUTBuilder.build`: a parameter read there but missing here would serve a stale cube.
+public struct PrintModelKey: Equatable, Sendable {
+    public let cyan: DyeSpectrum
+    public let magenta: DyeSpectrum
+    public let yellow: DyeSpectrum
+    public let dyeDMax: [Double]
+    public let printDMin: Double
+    public let projectorCCT: Double
+
+    public init(_ p: EngineParameters) {
+        cyan = p.cyan; magenta = p.magenta; yellow = p.yellow
+        dyeDMax = p.dyeDMax; printDMin = p.printDMin; projectorCCT = p.projectorCCT
+    }
+}
+
 public struct PrintModel: Sendable {
     public let absorbances: [[Double]]      // [dye][wavelength], peak-normalised
     public let projector: [Double]          // lamp SPD on the grid, peak-normalised

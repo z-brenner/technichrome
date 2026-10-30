@@ -220,10 +220,10 @@ struct CameraView: View {
 
     private func setUp() {
         if renderer == nil, let r = PreviewRenderer(engine: model.engine) {
-            r.parameters = model.parameters
             renderer = r
             model.camera.frameHandler = { buffer in r.submit(pixelBuffer: buffer) }
         }
+        renderer?.parameters = model.parameters   // may have changed in the Laboratory while this view was away
         model.camera.start()
     }
 
@@ -235,7 +235,7 @@ struct CameraView: View {
             do {
                 let result = try await model.camera.capture()
                 withAnimation(.easeOut(duration: 0.2)) { flashOverlay = false }
-                let record = try model.store.add(capture: result)
+                let record = try await model.store.add(capture: result)
                 model.developing = record
             } catch {
                 withAnimation { flashOverlay = false }

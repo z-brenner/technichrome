@@ -72,30 +72,36 @@ public final class PhotoStore {
         records = found.sorted { $0.capturedAt > $1.capturedAt }
     }
 
-    /// Persists a capture: writes the original (DNG or HEIF) and the optional Apple companion.
+    /// Persists a capture: writes the original (DNG or HEIF) and the optional Apple companion off the
+    /// main actor (a DNG is tens of megabytes), then registers the record.
     @discardableResult
-    public func add(capture: CaptureResult) throws -> PhotoRecord {
+    public func add(capture: CaptureResult) async throws -> PhotoRecord {
         let id = UUID()
         let dir = folder(for: id)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var record = PhotoRecord(id: id, capturedAt: capture.capturedAt, rawKind: capture.rawKind, lens: capture.lens,
                                  pixelWidth: capture.pixelWidth, pixelHeight: capture.pixelHeight, cameraModel: capture.lensModel,
                                  iso: capture.iso, exposureDuration: capture.exposureDuration, exposureBias: capture.exposureBias,
                                  baselineExposure: 0, printExposureEV: 0, parameters: nil, isDeveloped: false)
+        if capture.rawData == nil { record.rawKind = .none }
+        guard capture.rawData != nil || capture.processedData != nil else { throw CameraError.captureFailed("nothing to save") }
+        try await Task.detached(priority: .userInitiated) {
+            try Self.writeCaptureFiles(capture, to: dir)
+        }.value
+        try save(record)
+        records.insert(record, at: 0)
+        return record
+    }
+
+    private nonisolated static func writeCaptureFiles(_ capture: CaptureResult, to dir: URL) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if let raw = capture.rawData {
             try raw.write(to: dir.appendingPathComponent("original.dng"), options: .atomic)
             if let heif = capture.processedData {
                 try heif.write(to: dir.appendingPathComponent("apple.heic"), options: .atomic)
             }
         } else if let heif = capture.processedData {
-            record.rawKind = .none
             try heif.write(to: dir.appendingPathComponent("original.heic"), options: .atomic)
-        } else {
-            throw CameraError.captureFailed("nothing to save")
         }
-        try save(record)
-        records.insert(record, at: 0)
-        return record
     }
 
     public func save(_ record: PhotoRecord) throws {

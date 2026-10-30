@@ -31,7 +31,8 @@ struct RootView: View {
                 .environment(model)
                 .presentationDetents([.large])
         }
-        .alert("Engine unavailable", isPresented: .constant(model.engineError != nil)) {
+        .alert("Engine unavailable", isPresented: Binding(get: { model.engineError != nil },
+                                                           set: { if !$0 { model.engineError = nil } })) {
             Button("OK") {}
         } message: {
             Text(model.engineError ?? "")

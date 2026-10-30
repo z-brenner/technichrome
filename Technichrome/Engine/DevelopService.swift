@@ -8,13 +8,24 @@
 
 import Foundation
 import CoreImage
-import UIKit
+import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 
-public struct DevelopedImage: Sendable {
-    public let image: CGImage
+public struct DevelopedImage: @unchecked Sendable {
+    public let image: CGImage           // display-sized (long edge ≈ 1500 px), Display P3
     public let baselineExposure: Double
+}
+
+public enum DevelopError: Error, LocalizedError {
+    case renderFailed
+    case writeFailed(URL)
+    public var errorDescription: String? {
+        switch self {
+        case .renderFailed: return "The print could not be rendered."
+        case .writeFailed(let url): return "The print could not be written to \(url.lastPathComponent)."
+        }
+    }
 }
 
 public final class DevelopService: @unchecked Sendable {
@@ -55,25 +66,38 @@ public final class DevelopService: @unchecked Sendable {
         context.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: TechnichromeEngine.outputColorSpace)
     }
 
-    /// Full-resolution develop, written to disk. Returns the developed CGImage (for display).
+    /// Full-resolution develop, written to disk. The graph is evaluated exactly once; the thumbnail and the
+    /// display image are derived from that render.
     @discardableResult
-    public func developToDisk(record: PhotoRecord, store: PhotoStore, parameters: EngineParameters, extraEV: Double) async throws -> DevelopedImage {
+    public func developToDisk(record: PhotoRecord, store: PhotoStore, parameters: EngineParameters, extraEV: Double) throws -> DevelopedImage {
         let (linear, baseline) = try linearSource(for: record, store: store)
         let longEdge = Double(max(linear.extent.width, linear.extent.height))
         let print = makePrint(linear: linear, baselineEV: baseline, parameters: parameters, extraEV: extraEV, fullLongEdge: longEdge)
-        let developedURL = store.developedURL(for: record)
-        let thumbURL = store.thumbnailURL(for: record)
-        let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
-        try context.writeJPEGRepresentation(of: print, to: developedURL, colorSpace: TechnichromeEngine.outputColorSpace,
-                                            options: [quality: 0.95])
-        // Thumbnail (long edge 600 px)
-        let ts = 600.0 / longEdge
-        let thumb = print.transformed(by: CGAffineTransform(scaleX: ts, y: ts))
-        try context.writeJPEGRepresentation(of: thumb, to: thumbURL, colorSpace: TechnichromeEngine.outputColorSpace,
-                                            options: [quality: 0.85])
-        guard let cg = render(thumb.transformed(by: CGAffineTransform(scaleX: 2.5, y: 2.5))) else {
-            throw RAWDeveloperError.unsupportedRAW
+        guard let full = render(print) else { throw DevelopError.renderFailed }
+
+        try Self.writeJPEG(full, to: store.developedURL(for: record), quality: 0.95)
+
+        let fullImage = CIImage(cgImage: full)
+        let thumbScale = min(1.0, 600.0 / longEdge)
+        guard let thumb = render(fullImage.transformed(by: CGAffineTransform(scaleX: thumbScale, y: thumbScale))) else {
+            throw DevelopError.renderFailed
         }
-        return DevelopedImage(image: cg, baselineExposure: baseline)
+        try Self.writeJPEG(thumb, to: store.thumbnailURL(for: record), quality: 0.85)
+
+        let displayScale = min(1.0, 1500.0 / longEdge)
+        guard let display = render(fullImage.transformed(by: CGAffineTransform(scaleX: displayScale, y: displayScale))) else {
+            throw DevelopError.renderFailed
+        }
+        return DevelopedImage(image: display, baselineExposure: baseline)
+    }
+
+    /// Writes a CGImage (which carries its Display P3 colour space) as a JPEG with ImageIO.
+    static func writeJPEG(_ image: CGImage, to url: URL, quality: Double) throws {
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw DevelopError.writeFailed(url)
+        }
+        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+        CGImageDestinationAddImage(dest, image, props as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw DevelopError.writeFailed(url) }
     }
 }

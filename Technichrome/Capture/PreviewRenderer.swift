@@ -23,9 +23,12 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     private var latest: CIImage?
     nonisolated private let frameLock = NSLock()
     nonisolated(unsafe) private var pendingFrame: CIImage?
-    var parameters: EngineParameters = .default
-    var exposureEV: Double = 0
-    var showsLook = true
+    var parameters: EngineParameters = .default { didSet { if parameters != oldValue { dirty = true } } }
+    var exposureEV: Double = 0 { didSet { dirty = true } }
+    var showsLook = true { didSet { dirty = true } }
+    /// Set when a new frame, parameter or size requires a redraw; the view ticks at 30 fps regardless.
+    private var dirty = true
+    private var lastDrawableSize: CGSize = .zero
     /// Rendered image rect in view points (for tap-to-focus mapping).
     private(set) var imageRect: CGRect = .zero
 
@@ -69,8 +72,10 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
 
     private func render(in view: MTKView) {
         frameLock.lock(); let frame = pendingFrame; pendingFrame = nil; frameLock.unlock()
-        if let frame { latest = frame }
-        guard let source = latest, let drawable = view.currentDrawable, let buffer = commandQueue.makeCommandBuffer() else { return }
+        if let frame { latest = frame; dirty = true }
+        if view.drawableSize != lastDrawableSize { lastDrawableSize = view.drawableSize; dirty = true }
+        guard dirty, let source = latest, let drawable = view.currentDrawable, let buffer = commandQueue.makeCommandBuffer() else { return }
+        dirty = false
 
         var image = source
         if showsLook, let engine {
