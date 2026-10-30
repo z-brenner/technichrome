@@ -17,8 +17,10 @@ def main():
     current = params_to_swift_json(eng)
     for k, v in current.items():
         fv = fx['parameters'][k]
-        if isinstance(v, float) or isinstance(v, int):
+        if isinstance(v, (float, int)):
             assert abs(float(v) - float(fv)) < 1e-9, f"parameter {k} drifted: fixture {fv} vs prototype {v}"
+        elif isinstance(v, list) and v and isinstance(v[0], (float, int)):
+            assert np.allclose(v, fv, atol=1e-9), f"parameter {k} drifted: fixture {fv} vs prototype {v}"
         else:
             assert v == fv, f"parameter {k} drifted: fixture {fv} vs prototype {v}"
     # 2. outputs reproduce

@@ -189,7 +189,10 @@ DEFAULT_DYES = DyeSet(
 class EngineParams:
     # exposure
     exposure_ev: float = 0.0
-    # camera
+    # camera: the separation matrix is a frozen constant (derived once by derive_separation.py from the
+    # assumed sensitivities below; re-deriving at run time is a numerical optimisation whose last digits
+    # differ between machines). Rows: red, green, blue record; columns: linear sRGB R, G, B.
+    separation_matrix: tuple = ((0.8473, 0.1158, 0.0369), (0.0310, 0.9297, 0.0393), (0.0398, 0.0864, 0.8738))
     sensitivities: SeparationSensitivities = field(default_factory=SeparationSensitivities)
     # negatives (three B&W separation negatives 'developed to equal contrast' — Ball 1935)
     neg_dmin: float = 0.12
@@ -238,7 +241,7 @@ class Engine:
     def __init__(self, params: EngineParams | None = None, dyes: DyeSet = DEFAULT_DYES, lut_size=33):
         self.p = params or EngineParams()
         self.dyes = dyes
-        self.M_sep, _ = derive_separation_matrix(self.p.sensitivities)
+        self.M_sep = np.array(self.p.separation_matrix, dtype=np.float64)
         self.neg = HDCurve(self.p.neg_dmin, self.p.neg_dmax, self.p.neg_gamma, self.p.neg_log_e0, self.p.neg_nu)
         self.key = HDCurve(0.0, self.p.key_dmax, self.p.key_gamma, self.p.key_log_e0, self.p.key_nu)
         self.mats = [HDCurve(0.0, self.p.dye_dmax[i], self.p.mat_gamma, self.p.mat_log_e0, self.p.mat_nu) for i in range(3)]
