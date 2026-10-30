@@ -11,7 +11,8 @@ filter: separation negatives, gelatin matrices, three dyes, a silver key, a carb
 
 1. Open Technichrome. The live preview already shows the look (an approximation, computed from the video feed).
 2. Point. Tap to focus and expose, drag vertically for exposure compensation, double-tap to reset. Choose a lens (0.5×, 1×, telephoto).
-3. Photograph. The app captures **Bayer RAW** (DNG) on any physical back camera that offers it, Apple ProRAW where Bayer is unavailable, HEIF as a last resort. The RAW is preserved untouched.
+   On an iPhone 16 the Camera Control button offers the same two settings (exposure in thirds of a stop, lens).
+3. Photograph, on screen or with a volume button or the Camera Control button (iOS 17.2 and later). The app captures **Bayer RAW** (DNG) on any physical back camera that offers it, Apple ProRAW where Bayer is unavailable, HEIF as a last resort. The RAW is preserved untouched.
 4. Develop. The RAW is decoded to scene-linear data with every Apple "look" stage disabled, then printed by the engine on the GPU — you watch the silver key, then yellow, cyan and magenta go down in the order Ball described in 1935.
 5. Keep. Save the print (Display P3 JPEG) and the DNG to Photos, share either, or open the Laboratory to adjust every engine parameter on the photograph and re-develop.
 
@@ -90,7 +91,7 @@ Every pull request compiles the iOS app on a macOS runner and runs the app's own
 simulator: the Core Image/Metal engine is rendered on known scene-linear values and compared pixel by
 pixel with the CPU reference pipeline (worst error 0.0023 in display-linear units), the misregistration
 path is checked on a uniform image, the develop reveal's dye order is checked, and the timing measurement
-is checked against its formula. The Linux job runs the 19 core tests, including parity with the Python
+is checked against its formula. The Linux job runs the 21 core tests, including parity with the Python
 prototype; the Python job checks that the committed fixture reproduces from the prototype's defaults.
 
 ## Design
@@ -103,7 +104,10 @@ screen builds the print in dye order. Nothing else competes with the photograph.
 
 This repository was produced without access to a Mac, Xcode or an iPhone. What has been verified:
 
-* The colour-science core compiles and its tests pass on Linux (Swift 6.1 toolchain, Swift 5 language mode): 19 tests.
+* The colour-science core compiles and its tests pass on Linux (Swift 6.1 toolchain, Swift 5 language mode): 21 tests.
+* The iOS app compiles on a macOS runner (Xcode 16, iOS 18 SDK) and its GPU parity tests pass on an iPhone simulator.
+* Review passes (ours and Codex's) found and fixed: a `swift test` failure masked by a pipe, print timing
+  measured before the preset was loaded in the Python developer, and the items below.
 * A self-review pass found and fixed: alpha summing in the misregistration path, RAW formats queried before the
   session configuration was committed, a capture continuation that could lock the shutter, a triple full-resolution
   render in the develop step, main-thread file writes, and an undismissable alert.
@@ -115,9 +119,8 @@ This repository was produced without access to a Mac, Xcode or an iPhone. What h
 
 What has **not** been verified and needs a device:
 
-* Compilation of the iOS-only files (AVFoundation, Core Image, Metal kernels, SwiftUI). They were written
-  against the documented APIs and reviewed for isolation rules, but a first build on a Mac will probably
-  surface a handful of small fixes.
+* Running on a physical iPhone. The app compiles and its engine tests pass on the simulator, but the camera,
+  the hardware buttons (volume, Camera Control) and the RAW decoder have only been exercised in code review.
 * That `CIRAWFilter` at `boostAmount = 0` places diffuse white where the engine expects it. The Python
   path uses LibRaw; Apple's decoder may differ by a constant exposure offset. Print timing absorbs most of
   it; adjust `exposureEV` in the Laboratory for the rest and make it the default.
@@ -125,10 +128,13 @@ What has **not** been verified and needs a device:
 * Live-preview performance (Core Image graph on 1080p frames at 30 fps) and full-resolution develop time/memory.
 * The Photos export pairing (print JPEG + DNG as separate assets).
 * Tap-to-focus coordinate mapping with the rotated preview.
+* Camera Control: that the exposure slider and the lens picker appear and stay in step with the on-screen
+  controls (the session queue is the controls' action queue, as the API requires).
 
 ## Roadmap for the engine
 
 * Own Metal demosaic from the Bayer buffer, applying the separation model before any camera matrix.
 * Spectral upsampling of the camera data instead of a 3×3 separation matrix.
 * Measured dye spectra, if access to a dye-transfer print and a spectrophotometer can be arranged.
-* A reference-frame comparison mode in the Laboratory (split screen against a scanned frame).
+* Calibration of the shipped parameters against reference frames of known provenance, using the
+  Laboratory's split-screen comparison against a scanned frame.
