@@ -5,7 +5,7 @@ import re, sys
 
 
 def set_value(src, name, value):
-    pat = re.compile(r"(    %s: (?:float|tuple|str) = )([^#\n]+)(\s*#.*)?\n" % re.escape(name))
+    pat = re.compile(r"(    %s: (?:float|tuple|str) = )([^#\n]+?)(\s*#.*)?\n" % re.escape(name))
     m = pat.search(src)
     if not m:
         raise SystemExit(f"parameter {name} not found")

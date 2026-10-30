@@ -84,6 +84,15 @@ python3 set_params.py mat_gamma=3.2 --calibrate  # edit defaults, recalibrate ne
 python3 sync_swift.py                            # push the defaults into EngineParameters.swift
 ```
 
+## What CI verifies
+
+Every pull request compiles the iOS app on a macOS runner and runs the app's own unit tests on an iPhone
+simulator: the Core Image/Metal engine is rendered on known scene-linear values and compared pixel by
+pixel with the CPU reference pipeline (worst error 0.0023 in display-linear units), the misregistration
+path is checked on a uniform image, the develop reveal's dye order is checked, and the timing measurement
+is checked against its formula. The Linux job runs the 19 core tests, including parity with the Python
+prototype; the Python job checks that the committed fixture reproduces from the prototype's defaults.
+
 ## Design
 
 Black laboratory, ivory serif type with wide tracking, one red. The shutter is a red disc in an ivory

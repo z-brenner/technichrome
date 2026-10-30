@@ -240,6 +240,9 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.sessionPreset = .photo
+        // The live preview is linearised from the video stream, so keep that stream plain: no video HDR
+        // (local tone mapping) and a known sRGB colour space instead of automatic wide colour.
+        session.automaticallyConfiguresCaptureDeviceForWideColor = false
 
         // Physical back cameras only: Bayer RAW is not available on virtual (multi-camera) devices.
         let discovery = AVCaptureDevice.DiscoverySession(
@@ -281,6 +284,11 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         // Bayer RAW requires videoZoomFactor == 1 on the physical device.
         if (try? dev.lockForConfiguration()) != nil {
             dev.videoZoomFactor = 1.0
+            if dev.activeFormat.isVideoHDRSupported {
+                dev.automaticallyAdjustsVideoHDREnabled = false
+                dev.isVideoHDREnabled = false
+            }
+            if dev.activeFormat.supportedColorSpaces.contains(.sRGB) { dev.activeColorSpace = .sRGB }
             if dev.isFocusModeSupported(.continuousAutoFocus) { dev.focusMode = .continuousAutoFocus }
             if dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
             dev.unlockForConfiguration()

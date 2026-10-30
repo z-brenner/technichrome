@@ -22,7 +22,7 @@ def params_to_swift_json(eng: T.Engine, name="Technichrome v1"):
         "exposureEV": p.exposure_ev,
         "separationMatrix": [float(v) for v in eng.M_sep.ravel()],
         "negative": curve_json(p.neg_dmin, p.neg_dmax, p.neg_gamma, p.neg_log_e0, p.neg_nu),
-        "dyeDMax": list(p.dye_dmax), "dyeGain": list(p.dye_gain),
+        "dyeDMax": list(p.dye_dmax), "dyeGain": list(p.dye_gain), "dyeLightEV": list(p.dye_light_ev),
         "matrixGamma": p.mat_gamma, "matrixLogE0": p.mat_log_e0, "matrixNu": p.mat_nu,
         "keyStrength": p.key_strength,
         "key": curve_json(0.0, p.key_dmax, p.key_gamma, p.key_log_e0, p.key_nu),
@@ -45,6 +45,7 @@ def swift_literal(eng: T.Engine):
     out.append(f"        negative: CurveParameters(dMin: {p.neg_dmin}, dMax: {p.neg_dmax}, gamma: {p.neg_gamma:.4f}, logE0: {p.neg_log_e0:.4f}, nu: {p.neg_nu:.4f}),")
     out.append(f"        dyeDMax: [{p.dye_dmax[0]}, {p.dye_dmax[1]}, {p.dye_dmax[2]}],")
     out.append(f"        dyeGain: [{p.dye_gain[0]:.4f}, {p.dye_gain[1]:.4f}, {p.dye_gain[2]:.4f}],")
+    out.append(f"        dyeLightEV: [{p.dye_light_ev[0]:.4f}, {p.dye_light_ev[1]:.4f}, {p.dye_light_ev[2]:.4f}],")
     out.append(f"        matrixGamma: {p.mat_gamma:.4f}, matrixLogE0: {p.mat_log_e0:.4f}, matrixNu: {p.mat_nu:.4f},")
     out.append(f"        keyStrength: {p.key_strength},")
     out.append(f"        key: CurveParameters(dMin: 0, dMax: {p.key_dmax}, gamma: {p.key_gamma}, logE0: {p.key_log_e0}, nu: {p.key_nu}),")

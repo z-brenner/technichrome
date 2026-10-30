@@ -83,16 +83,16 @@ if __name__ == '__main__':
         print('auto-exposure scale', round(k, 3))
     lin = lin * 2 ** a.ev
     params = T.EngineParams()
-    if not a.autoexpose and not a.no_timing:
-        g = T.geometric_mean_luminance(lin)
-        tev = T.timing_exposure_ev(g, params.timing_target, params.timing_strength, params.timing_limit)
-        print(f'print timing: geometric mean {g:.4f} -> {tev:+.2f} EV')
-        lin = lin * 2 ** tev
     if a.params:
         d = json.load(open(a.params))
         for k, v in d.items():
             if hasattr(params, k):
                 setattr(params, k, tuple(v) if isinstance(v, list) else v)
+    if not a.autoexpose and not a.no_timing and params.timing_strength > 0:
+        g = T.geometric_mean_luminance(lin)
+        tev = T.timing_exposure_ev(g, params.timing_target, params.timing_strength, params.timing_limit)
+        print(f'print timing: geometric mean {g:.4f} -> {tev:+.2f} EV')
+        lin = lin * 2 ** tev
     eng = T.Engine(params, lut_size=33)
     dev = develop_image(lin, eng)
     to_png8(naive_render(lin)).save(a.out + '_plain.png')

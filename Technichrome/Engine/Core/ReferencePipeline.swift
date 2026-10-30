@@ -39,7 +39,8 @@ public struct ReferencePipeline: Sendable {
         let logPrint = -dn
         var dye = SIMD3<Double>(repeating: 0)
         for i in 0..<3 {
-            let d = matrices[i].density(logExposure: logPrint[i]) * p.dyeGain[i]
+            let light = p.dyeLightEV[i] * log10(2.0)   // printer light for this matrix, log10 units
+            let d = matrices[i].density(logExposure: logPrint[i] + light) * p.dyeGain[i]
             dye[i] = min(max(d / p.dyeDMax[i], 0), 1)
         }
         let k = key.density(logExposure: logPrint.y) * p.keyStrength

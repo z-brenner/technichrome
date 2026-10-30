@@ -139,10 +139,12 @@ public final class TechnichromeEngine: @unchecked Sendable {
         let matVec = CIVector(x: CGFloat(mat.a), y: CGFloat(mat.logE0), z: CGFloat(mat.xHalf), w: CGFloat(mat.nu))
         let dmax = CIVector(x: CGFloat(p.dyeDMax[0]), y: CGFloat(p.dyeDMax[1]), z: CGFloat(p.dyeDMax[2]))
         let gain = CIVector(x: CGFloat(p.dyeGain[0]), y: CGFloat(p.dyeGain[1]), z: CGFloat(p.dyeGain[2]))
+        let l10 = log10(2.0)
+        let light = CIVector(x: CGFloat(p.dyeLightEV[0] * l10), y: CGFloat(p.dyeLightEV[1] * l10), z: CGFloat(p.dyeLightEV[2] * l10))
         func row(_ i: Int) -> CIVector { CIVector(x: CGFloat(sep[i, 0]), y: CGFloat(sep[i, 1]), z: CGFloat(sep[i, 2])) }
 
         guard var densities = separateKernel.apply(extent: extent, arguments: [
-            src, glow, bloomAmount, exposureScale, row(0), row(1), row(2), negVec, negShape, matVec, dmax, gain, dyeMask.vector
+            src, glow, bloomAmount, exposureScale, row(0), row(1), row(2), negVec, negShape, matVec, dmax, gain, light, dyeMask.vector
         ]) else { return input }
 
         // Silver key image

@@ -58,6 +58,25 @@ final class EngineGPUParityTests: XCTestCase {
         print("GPU vs CPU reference worst error: \(worst)")
     }
 
+    func testGPUEngineMatchesCPUReferenceWithPrinterLightsAndNoKey() throws {
+        // Exercises the per-matrix light path of the kernel and a key-less (post-1944) print.
+        let engine = try TechnichromeEngine(lutDimension: 33)
+        let context = CIContext.technichrome()
+        var params = EngineParameters.default
+        params.dyeLightEV = [0.3, -0.1, 0.15]
+        params.keyStrength = 0
+        let reference = ReferencePipeline(parameters: params, lutDimension: 33, displaySpace: .displayP3)
+        let input = makeImage(samples)
+        let output = engine.makeImage(from: input, parameters: params, exposureScale: 1, longEdge: Double(samples.count), spatial: false)
+        let pixels = readPixels(output, context: context, count: samples.count)
+        for (i, s) in samples.enumerated() {
+            let expected = ColorSpaces.p3ToSRGB * reference.develop(sceneLinear: s)
+            for c in 0..<3 {
+                XCTAssertEqual(pixels[i][c], expected[c], accuracy: 0.02, "sample \(i) \(s) channel \(c)")
+            }
+        }
+    }
+
     func testMisregistrationLeavesUniformImageUnchanged() throws {
         // A uniform image shifted against itself must print identically: guards the alpha-summing class of bug.
         let engine = try TechnichromeEngine(lutDimension: 33)

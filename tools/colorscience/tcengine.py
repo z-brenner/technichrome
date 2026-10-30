@@ -202,7 +202,12 @@ class EngineParams:
     neg_nu: float = 0.2001
     # matrices + dye transfer (per dye peak density at full transfer)
     dye_dmax: tuple = (2.8, 2.8, 2.8)
-    dye_gain: tuple = (1.1963, 0.9153, 0.8884)# Technicolor's per-matrix 'colour control'
+    # Technicolor's per-matrix 'colour control': a density (contrast) multiplier per dye, calibrated so that
+    # greys print neutral through the whole scale, plus printer lights (stops) that shift each matrix curve.
+    # Lights alone cannot neutralise every grey level: balanced by lights only, this model shows the classic
+    # crossover (cyan highlights, red shadows) that period sources describe as blacks with unwanted hues.
+    dye_gain: tuple = (1.1963, 0.9153, 0.8884)
+    dye_light_ev: tuple = (0.0, 0.0, 0.0)
     mat_gamma: float = 3.2176
     mat_log_e0: float = -1.0621# log10 printing exposure at half density
     mat_nu: float = 0.0253
@@ -298,22 +303,35 @@ class Engine:
 
     # --- calibration -------------------------------------------------------------------------
     def calibrate_neutral(self, greys=(0.6, 0.18, 0.05), iterations=12):
-        """Technicolor balanced each print so that greys printed neutral ('timing'). Adjust dye_gain so
-        that scene greys come out neutral in display-linear space. Returns the gains."""
+        """Balance the print so that greys print neutral through the scale, using the per-matrix density
+        (contrast) multipliers. Returns the gains."""
         gains = np.array(self.p.dye_gain, dtype=np.float64)
         for _ in range(iterations):
             self.p.dye_gain = tuple(gains)
             errs = []
             for g in greys:
                 out = self.develop(np.array([[g, g, g]]), use_lut=False)[0]
-                mean = out.mean()
-                errs.append(out / mean - 1.0)   # +ve = channel too bright = too little of the dye that absorbs it
-            e = np.mean(errs, axis=0)           # r, g, b error
-            # cyan absorbs red, magenta absorbs green, yellow absorbs blue
+                errs.append(out / out.mean() - 1.0)   # +ve = channel too bright = too little of the dye that absorbs it
+            e = np.mean(errs, axis=0)
             gains = gains * (1.0 + 0.6 * e)
             gains = gains / gains.mean()
         self.p.dye_gain = tuple(float(x) for x in gains)
         return self.p.dye_gain
+
+    def calibrate_neutral_lights(self, greys=(0.6, 0.18, 0.05), iterations=16):
+        """Balance with the printer lights only (an experiment that shows the crossover). Returns the lights."""
+        lights = np.array(self.p.dye_light_ev, dtype=np.float64)
+        for _ in range(iterations):
+            self.p.dye_light_ev = tuple(lights)
+            errs = []
+            for g in greys:
+                out = self.develop(np.array([[g, g, g]]), use_lut=False)[0]
+                errs.append(np.log2(np.maximum(out, 1e-6)) - np.log2(max(out.mean(), 1e-6)))
+            e = np.mean(errs, axis=0)
+            lights = lights + 0.5 * e
+            lights = lights - lights.mean()
+        self.p.dye_light_ev = tuple(float(x) for x in lights)
+        return self.p.dye_light_ev
 
     # --- per-pixel analytic part ---------------------------------------------------------
     def densities(self, rgb_linear):
@@ -324,7 +342,8 @@ class Engine:
         log_s = np.log10(np.maximum(Ssep, 1e-6))
         Dn = self.neg.density(log_s)
         log_print = -Dn                                  # printing exposure through the negative
-        dd = np.stack([self.mats[i].density(log_print[..., i]) * p.dye_gain[i] for i in range(3)], axis=-1)
+        light = np.array(p.dye_light_ev) * np.log10(2.0)
+        dd = np.stack([self.mats[i].density(log_print[..., i] + light[i]) * p.dye_gain[i] for i in range(3)], axis=-1)
         norm = dd / np.array(p.dye_dmax)
         key = self.key.density(log_print[..., 1]) * p.key_strength
         return np.clip(norm, 0.0, 1.0), key
