@@ -157,6 +157,7 @@ struct CameraView: View {
         .onTapGesture(count: 2) {
             model.camera.resetFocus()
             model.camera.setExposureBias(0)
+            withAnimation(.easeIn(duration: 0.2)) { focusVisible = false }   // also clears a lock's reticle
             Haptics.tick()
         }
         .onTapGesture(count: 1, coordinateSpace: .local) { location in
