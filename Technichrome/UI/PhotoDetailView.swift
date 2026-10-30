@@ -66,7 +66,7 @@ struct PhotoDetailView: View {
         HStack {
             Button { dismiss() } label: {
                 Image(systemName: "xmark").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.ivory).frame(width: 44, height: 44)
-            }.buttonStyle(.plain)
+            }.buttonStyle(.plain).accessibilityLabel("Close")
             Spacer()
             VStack(spacing: 3) {
                 TCLabel(record.capturedAt.formatted(date: .abbreviated, time: .shortened), size: 9, color: Theme.ivory)
@@ -75,7 +75,7 @@ struct PhotoDetailView: View {
             Spacer()
             Button { withAnimation { showsInfo.toggle() } } label: {
                 Image(systemName: "info.circle").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.ivoryDim).frame(width: 44, height: 44)
-            }.buttonStyle(.plain)
+            }.buttonStyle(.plain).accessibilityLabel("Photo information")
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)

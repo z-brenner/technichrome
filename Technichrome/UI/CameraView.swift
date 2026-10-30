@@ -60,6 +60,7 @@ struct CameraView: View {
                     .overlay(Capsule().strokeBorder(Theme.ivoryFaint, lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(showsLook ? "Preview shows the Technichrome look" : "Preview shows the plain camera image")
             .frame(width: 90, alignment: .trailing)
         }
         .padding(.horizontal, 18)
