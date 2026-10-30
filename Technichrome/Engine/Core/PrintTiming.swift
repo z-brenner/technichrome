@@ -14,9 +14,15 @@ import Foundation
 public enum PrintTiming {
     /// Exposure correction in stops that moves a scene's geometric-mean luminance toward `target`,
     /// scaled by `strength` (0 = off, 1 = full correction) and clamped to ±`limit`.
-    public static func exposureEV(geometricMeanLuminance g: Double, target: Double, strength: Double, limit: Double) -> Double {
+    ///
+    /// `cameraBiasEV` is the exposure compensation the photographer dialled in at capture. It is taken out
+    /// of the measurement first, so timing corrects only the camera's automatic placement and the
+    /// photographer's own choice reaches the print at full strength: a deliberate −1 EV prints a stop darker.
+    public static func exposureEV(geometricMeanLuminance g: Double, target: Double, strength: Double, limit: Double,
+                                  cameraBiasEV: Double = 0) -> Double {
         guard g > 0, target > 0, g.isFinite, strength > 0 else { return 0 }
-        let full = log2(target / g)
+        let placement = g / pow(2.0, cameraBiasEV)      // what the automatic exposure produced on its own
+        let full = log2(target / placement)
         let scaled = full * min(max(strength, 0), 1)
         let lim = max(0, limit)
         return min(max(scaled, -lim), lim)

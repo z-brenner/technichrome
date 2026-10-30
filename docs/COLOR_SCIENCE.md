@@ -126,6 +126,12 @@ target key of 0.16, by 60 % of the distance and never more than ±1.25 stops. St
 off; the measured value is stored with each photograph and shown in the Laboratory. The target and
 strength are approximations to be checked on hardware against the LibRaw path used for tuning.
 
+The photographer's exposure compensation is taken out of the measurement first: timing corrects the
+camera's automatic placement only, so a deliberate −1 EV at capture prints a full stop darker rather
+than being 60 % undone by the timer. The live preview is timed the same way — measured from the
+frames about twice a second and smoothed — so what the preview shows is the timed print, not the
+untimed one.
+
 ### [6] Dyes — approximation informed by the literature
 
 No spectral curves of Technicolor's dyes are publicly tabulated as far as we know. We model each dye

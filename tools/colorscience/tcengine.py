@@ -367,12 +367,15 @@ class Engine:
         return rgb
 
 
-def timing_exposure_ev(geometric_mean, target, strength, limit):
+def timing_exposure_ev(geometric_mean, target, strength, limit, camera_bias_ev=0.0):
     """Print timing: exposure correction (stops) moving the geometric-mean luminance toward `target`,
-    scaled by `strength` and clamped to ±`limit`. Mirrors PrintTiming.swift."""
+    scaled by `strength` and clamped to ±`limit`. The photographer's exposure compensation
+    (`camera_bias_ev`) is taken out first so only the camera's automatic placement is corrected.
+    Mirrors PrintTiming.swift."""
     if geometric_mean <= 0 or target <= 0 or strength <= 0:
         return 0.0
-    full = np.log2(target / geometric_mean)
+    placement = geometric_mean / (2.0 ** camera_bias_ev)
+    full = np.log2(target / placement)
     return float(np.clip(full * min(max(strength, 0.0), 1.0), -limit, limit))
 
 

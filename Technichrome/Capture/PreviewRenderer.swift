@@ -9,6 +9,7 @@
 
 import Foundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import Metal
 import MetalKit
 import UIKit
@@ -26,7 +27,13 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     nonisolated(unsafe) private var pendingFrame: CIImage?
     var parameters: EngineParameters = .default { didSet { if parameters != oldValue { dirty = true } } }
     var exposureEV: Double = 0 { didSet { dirty = true } }
+    /// The photographer's exposure compensation, excluded from the preview's print timing like the develop step's.
+    var cameraBiasEV: Double = 0
     var showsLook = true { didSet { dirty = true } }
+    /// Print timing for the preview: measured about twice a second from the frames and smoothed, so the
+    /// preview predicts the timed print rather than the untimed one.
+    private(set) var previewTimingEV: Double = 0
+    private var frameCounter = 0
     /// Set when a new frame, parameter or size requires a redraw; the view ticks at 30 fps regardless.
     private var dirty = true
     private var lastDrawableSize: CGSize = .zero
@@ -89,7 +96,16 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
             ? source.transformed(by: CGAffineTransform(scaleX: preScale, y: preScale), highQualityDownsample: true)
             : source
         if showsLook, let engine {
-            let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: 0, extraEV: exposureEV)
+            frameCounter &+= 1
+            if parameters.timingStrength > 0 {
+                if frameCounter % 12 == 1 {
+                    let measured = measurePreviewTiming(of: image, engine: engine)
+                    previewTimingEV += 0.35 * (measured - previewTimingEV)   // settles within about a second
+                }
+            } else {
+                previewTimingEV = 0
+            }
+            let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: 0, extraEV: exposureEV + previewTimingEV)
             image = engine.makeImage(from: image, parameters: parameters, exposureScale: scale,
                                      longEdge: Double(max(image.extent.width, image.extent.height)), spatial: false)
         }
@@ -114,6 +130,21 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         }
         buffer.present(drawable)
         buffer.commit()
+    }
+
+    /// Print timing measured the way the develop step measures it: geometric-mean luminance after the engine's
+    /// fixed exposure, with the photographer's exposure compensation taken out. One 1×1 readback per call.
+    private func measurePreviewTiming(of image: CIImage, engine: TechnichromeEngine) -> Double {
+        let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: 0)
+        let average = CIFilter.areaAverage()
+        average.inputImage = engine.makeLogLuminance(from: image, exposureScale: scale)
+        average.extent = image.extent
+        guard let out = average.outputImage else { return previewTimingEV }
+        var pixel = [Float](repeating: 0, count: 4)
+        context.render(out, toBitmap: &pixel, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        guard pixel[0].isFinite else { return previewTimingEV }
+        return PrintTiming.exposureEV(geometricMeanLuminance: pow(2.0, Double(pixel[0])), target: parameters.timingTarget,
+                                      strength: parameters.timingStrength, limit: parameters.timingLimit, cameraBiasEV: cameraBiasEV)
     }
 
     /// Maps a tap in view points to AVFoundation device coordinates (0…1, landscape sensor frame).

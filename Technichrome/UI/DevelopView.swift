@@ -149,7 +149,7 @@ struct DevelopView: View {
         let (stages, timing) = await Task.detached(priority: .userInitiated) { () -> ([Stage: CGImage], Double) in
             do {
                 let (linear, baseline) = try dev.linearSource(for: rec, store: store, scaleFactor: 0.25, draft: true)
-                let timing = dev.measureTiming(linear: linear, baselineEV: baseline, parameters: params)
+                let timing = dev.measureTiming(linear: linear, baselineEV: baseline, parameters: params, cameraBiasEV: Double(rec.exposureBias))
                 let longEdge = Double(max(linear.extent.width, linear.extent.height))
                 var out: [Stage: CGImage] = [:]
                 for s in [Stage.key, .yellow, .cyan, .magenta] {
