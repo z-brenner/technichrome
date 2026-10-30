@@ -8,6 +8,7 @@
 
 import SwiftUI
 import CoreImage
+import PhotosUI
 
 struct LaboratoryView: View {
     @Environment(AppModel.self) private var model
@@ -21,6 +22,9 @@ struct LaboratoryView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var exportURL: URL?
+    @State private var referenceItem: PhotosPickerItem?
+    @State private var referenceImage: UIImage?
+    @State private var splitFraction: CGFloat = 0.5
 
     var body: some View {
         NavigationStack {
@@ -51,6 +55,7 @@ struct LaboratoryView: View {
         }
         .onAppear { params = model.parameters; loadSource() }
         .onChange(of: params) { _, _ in scheduleRender() }
+        .onChange(of: referenceItem) { _, item in loadReference(item) }
         .alert("Laboratory", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
     }
 
@@ -60,15 +65,51 @@ struct LaboratoryView: View {
         ZStack {
             Color(white: 0.04)
             if let preview {
-                Image(decorative: preview, scale: 1, orientation: .up).resizable().scaledToFit()
+                if let referenceImage {
+                    SplitCompareView(left: Image(decorative: preview, scale: 1, orientation: .up), right: Image(uiImage: referenceImage), fraction: $splitFraction)
+                } else {
+                    Image(decorative: preview, scale: 1, orientation: .up).resizable().scaledToFit()
+                }
             } else {
                 TCLabel(record == nil ? "take a photograph to see it here" : "rendering", size: 10)
             }
             if busy {
                 VStack { Spacer(); HStack { Spacer(); ProgressView().tint(Theme.ivory).padding(10) } }
             }
+            VStack {
+                HStack {
+                    Spacer()
+                    PhotosPicker(selection: $referenceItem, matching: .images) {
+                        TCLabel(referenceImage == nil ? "reference frame" : "change reference", size: 9, color: Theme.ivory, tracking: 1.5)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Capsule().fill(Color.black.opacity(0.55)))
+                    }
+                    if referenceImage != nil {
+                        Button { referenceImage = nil; referenceItem = nil } label: {
+                            Image(systemName: "xmark").font(.system(size: 11, weight: .light)).foregroundStyle(Theme.ivory)
+                                .padding(8).background(Circle().fill(Color.black.opacity(0.55)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+                Spacer()
+            }
         }
         .frame(height: 260)
+    }
+
+    /// Loads a reference frame (a scan of a dye-transfer print, a frame from a restoration) chosen from Photos,
+    /// to be compared side by side with the live print preview.
+    private func loadReference(_ item: PhotosPickerItem?) {
+        guard let item else { referenceImage = nil; return }
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self), let ui = UIImage(data: data) {
+                referenceImage = ui
+            } else {
+                message = "That image could not be loaded."
+            }
+        }
     }
 
     private func loadSource() {
@@ -262,6 +303,32 @@ struct LaboratoryView: View {
             exportURL = url
         } catch {
             message = error.localizedDescription
+        }
+    }
+}
+
+
+/// Two images sharing one frame, divided by a draggable line: the print on the left, the reference on the right.
+struct SplitCompareView: View {
+    let left: Image
+    let right: Image
+    @Binding var fraction: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            ZStack(alignment: .leading) {
+                right.resizable().scaledToFit().frame(width: w, height: geo.size.height)
+                left.resizable().scaledToFit().frame(width: w, height: geo.size.height)
+                    .mask(alignment: .leading) { Rectangle().frame(width: w * fraction) }
+                Rectangle().fill(Theme.ivory).frame(width: 1).offset(x: w * fraction)
+                VStack { Spacer(); TCLabel("print", size: 8); Spacer() }.padding(.leading, 6)
+                VStack { Spacer(); HStack { Spacer(); TCLabel("reference", size: 8).padding(.trailing, 6) }; Spacer() }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 4).onChanged { v in
+                fraction = min(max(v.location.x / w, 0.02), 0.98)
+            })
         }
     }
 }

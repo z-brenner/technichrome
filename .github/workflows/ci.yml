@@ -55,9 +55,21 @@ jobs:
             build 2>&1 | tee build.log | grep -E "error:|warning: (unre|Main actor)|\*\* BUILD|Compiling|Metal" || true
           echo "---- result ----"
           if grep -q "\*\* BUILD SUCCEEDED \*\*" build.log; then echo "BUILD SUCCEEDED"; else echo "BUILD FAILED"; grep -E "error:" build.log | head -80; exit 1; fi
+      - name: Run the app's unit tests on the simulator (GPU engine parity with the CPU reference)
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available | grep -E "^\s+iPhone" | head -1 | sed -E 's/^ *(.*) \([0-9A-Fa-f-]{36}\).*/\1/')
+          echo "Simulator: $DEVICE"
+          xcodebuild test -project Technichrome.xcodeproj -scheme Technichrome \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee test.log | grep -E "error:|Test Case|Executed|GPU vs|\*\* TEST" || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" test.log
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: xcodebuild-log
-          path: build.log
+          name: xcodebuild-logs
+          path: |
+            build.log
+            test.log
