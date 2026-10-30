@@ -86,7 +86,9 @@ engine maths, so the look can be judged on real iPhone DNGs without a device.
 
 Core Image tiles large images automatically, so a 12 MP Bayer develop and a 48 MP ProRAW develop
 share one code path. Quick previews use `scaleFactor = 0.25` and draft mode. Full-resolution output is
-written with `CIContext.writeJPEGRepresentation` in Display P3.
+streamed to the JPEG with `CIContext.writeJPEGRepresentation` (Display P3, the provenance tags attached
+to the image), so the whole print is never held in memory; the gallery thumbnail and the display image
+are then decoded from that file at reduced size by ImageIO.
 
 ## Exposure
 

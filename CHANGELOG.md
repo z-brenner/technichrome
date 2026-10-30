@@ -3,6 +3,9 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 11 — full-resolution develop streamed to disk (#11)
+- The print is written in tiles straight from the Core Image graph and the thumbnail and display image are decoded from the file, so a 48 MP develop never holds the whole image in memory.
+
 ## Round 10 — AE/AF lock, RAW resolution policy (#10)
 - Long press locks focus and exposure at a point until the next tap; a tapped focus returns to continuous mode when the subject area changes.
 - RAW requests 12 MP by default (what every lens offers to Bayer RAW); full sensor resolution is a setting.
