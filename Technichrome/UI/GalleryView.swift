@@ -21,6 +21,7 @@ struct GalleryView: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Back to camera")
                 Spacer()
                 VStack(spacing: 3) {
                     Wordmark(size: 12)
@@ -35,6 +36,7 @@ struct GalleryView: View {
                             .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Settings")
                     Button {
                         model.selectedPhoto = model.store.records.first
                         model.showsLaboratory = true
@@ -43,6 +45,7 @@ struct GalleryView: View {
                             .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Laboratory")
                     .disabled(model.store.records.isEmpty)
                 }
             }
