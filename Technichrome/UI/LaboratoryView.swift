@@ -75,19 +75,20 @@ struct LaboratoryView: View {
         guard let record, let dev = model.develop else { return }
         let store = model.store
         Task.detached(priority: .userInitiated) {
-            if let (img, baseline) = try? dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true) {
-                let longEdge = Double(max(img.extent.width, img.extent.height))
-                await MainActor.run {
-                    linearCache = (img, baseline, longEdge)
-                    scheduleRender()
-                }
+            guard let source = try? dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true) else { return }
+            let (img, baseline) = source
+            let longEdge = Double(max(img.extent.width, img.extent.height))
+            await MainActor.run {
+                linearCache = (img, baseline, longEdge)
+                scheduleRender()
             }
         }
     }
 
     private func scheduleRender() {
         renderTask?.cancel()
-        guard let (img, baseline, longEdge) = linearCache, let dev = model.develop, let record else { return }
+        guard let cache = linearCache, let dev = model.develop, let record else { return }
+        let (img, baseline, longEdge) = cache
         let p = params
         busy = true
         renderTask = Task.detached(priority: .userInitiated) {

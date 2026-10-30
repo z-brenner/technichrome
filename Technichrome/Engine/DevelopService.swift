@@ -8,6 +8,7 @@
 
 import Foundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
