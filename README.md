@@ -12,7 +12,7 @@ filter: separation negatives, gelatin matrices, three dyes, a silver key, a carb
 ## What it does
 
 1. Open Technichrome. The live preview already shows the look (an approximation, computed from the video feed).
-2. Point. Tap to focus and expose, drag vertically for exposure compensation, double-tap to reset. Choose a lens (0.5×, 1×, telephoto).
+2. Point. Tap to focus and expose, drag vertically for exposure compensation (it reaches the print in full; print timing corrects only the camera's own placement), double-tap to reset. Choose a lens (0.5×, 1×, telephoto).
    On an iPhone 16 the Camera Control button offers the same two settings (exposure in thirds of a stop, lens).
 3. Photograph, on screen or with a volume button or the Camera Control button (iOS 17.2 and later). The app captures **Bayer RAW** (DNG) on any physical back camera that offers it, Apple ProRAW where Bayer is unavailable, HEIF as a last resort. The RAW is preserved untouched.
 4. Develop. The RAW is decoded to scene-linear data with every Apple "look" stage disabled, then printed by the engine on the GPU — you watch the silver key, then yellow, cyan and magenta go down in the order Ball described in 1935.
@@ -94,7 +94,7 @@ Every pull request compiles the iOS app on a macOS runner and runs the app's own
 simulator: the Core Image/Metal engine is rendered on known scene-linear values and compared pixel by
 pixel with the CPU reference pipeline (worst error 0.0023 in display-linear units), the misregistration
 path is checked on a uniform image, the develop reveal's dye order is checked, and the timing measurement
-is checked against its formula. The Linux job runs the 26 core tests, including parity with the Python
+is checked against its formula. The Linux job runs the 27 core tests, including parity with the Python
 prototype and the DNG tag parser; the Python job checks that the committed fixture reproduces from the prototype's defaults.
 
 ## Design
@@ -107,7 +107,7 @@ screen builds the print in dye order. Nothing else competes with the photograph.
 
 This repository was produced without access to a Mac, Xcode or an iPhone. What has been verified:
 
-* The colour-science core compiles and its tests pass on Linux (Swift 6.1 toolchain, Swift 5 language mode): 26 tests.
+* The colour-science core compiles and its tests pass on Linux (Swift 6.1 toolchain, Swift 5 language mode): 27 tests.
 * The iOS app compiles on a macOS runner (Xcode 16, iOS 18 SDK) and its GPU parity tests pass on an iPhone simulator.
 * Review passes (ours and Codex's) found and fixed: a `swift test` failure masked by a pipe, print timing
   measured before the preset was loaded in the Python developer, and the items below.

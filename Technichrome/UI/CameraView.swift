@@ -37,6 +37,7 @@ struct CameraView: View {
             if phase == .active { model.camera.start() } else if phase == .background { model.camera.stop() }
         }
         .onChange(of: model.parameters) { _, p in renderer?.parameters = p }
+        .onChange(of: model.camera.exposureBias) { _, ev in renderer?.cameraBiasEV = Double(ev) }
         .alert("Capture failed", isPresented: Binding(get: { captureError != nil }, set: { if !$0 { captureError = nil } })) {
             Button("OK") {}
         } message: { Text(captureError ?? "") }
@@ -232,6 +233,7 @@ struct CameraView: View {
             model.camera.frameHandler = { buffer in r.submit(pixelBuffer: buffer) }
         }
         renderer?.parameters = model.parameters   // may have changed in the Laboratory while this view was away
+        renderer?.cameraBiasEV = Double(model.camera.exposureBias)
         model.camera.start()
     }
 

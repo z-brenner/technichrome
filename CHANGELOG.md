@@ -3,6 +3,13 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 9 — timing respects the EV dial, timed preview (#9)
+- Print timing excludes the photographer's exposure compensation, so −1 EV at capture prints a stop darker.
+- The live preview is print-timed like the develop step, measured from the frames and smoothed.
+
+## Round 8 — diagnostics for the first run on hardware (#8)
+- Settings lists what the camera system reported for the current lens; hardware checklist; this changelog.
+
 ## Round 7 — import, honest labelling, provenance (#7)
 - Import a DNG or any image from Photos or Files; developed exactly like a capture.
 - `DNGInspector` reads the DNG's own tags to label an import *Bayer RAW*, *Apple ProRAW* or *Linear DNG*.

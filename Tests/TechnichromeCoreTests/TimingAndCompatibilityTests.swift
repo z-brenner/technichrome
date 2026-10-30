@@ -14,6 +14,16 @@ final class TimingAndCompatibilityTests: XCTestCase {
         XCTAssertEqual(PrintTiming.exposureEV(geometricMeanLuminance: 0, target: 0.16, strength: 1, limit: 1.25), 0)
     }
 
+    func testTimingLeavesThePhotographersExposureCompensationAlone() {
+        // The same scene, placed the same way by the camera's automatic exposure, once at ±0 and once at
+        // −1 EV: the RAW is half as bright, but timing must correct only the camera's own placement.
+        let plain = PrintTiming.exposureEV(geometricMeanLuminance: 0.09, target: 0.16, strength: 0.6, limit: 1.25)
+        let biased = PrintTiming.exposureEV(geometricMeanLuminance: 0.045, target: 0.16, strength: 0.6, limit: 1.25, cameraBiasEV: -1)
+        XCTAssertEqual(biased, plain, accuracy: 1e-12)
+        // A bias alone, with the camera's placement already on target, needs no timing at all.
+        XCTAssertEqual(PrintTiming.exposureEV(geometricMeanLuminance: 0.32, target: 0.16, strength: 1, limit: 1.25, cameraBiasEV: 1), 0, accuracy: 1e-12)
+    }
+
     func testGeometricMean() {
         XCTAssertEqual(PrintTiming.geometricMean([0.04, 1.0]), 0.2, accuracy: 1e-12)
         XCTAssertEqual(PrintTiming.geometricMean([]), 0)

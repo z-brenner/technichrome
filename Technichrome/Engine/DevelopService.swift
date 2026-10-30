@@ -64,8 +64,9 @@ public final class DevelopService: @unchecked Sendable {
     }
 
     /// Print timing: measures the scene's geometric-mean luminance (after the DNG baseline exposure and the
-    /// engine's fixed exposure, before any per-print choice) and returns the correction in stops.
-    public func measureTiming(linear: CIImage, baselineEV: Double, parameters p: EngineParameters) -> Double {
+    /// engine's fixed exposure, before any per-print choice) and returns the correction in stops. The
+    /// photographer's exposure compensation (`cameraBiasEV`) is excluded from the correction.
+    public func measureTiming(linear: CIImage, baselineEV: Double, parameters p: EngineParameters, cameraBiasEV: Double = 0) -> Double {
         guard p.timingStrength > 0 else { return 0 }
         let scale = TechnichromeEngine.exposureScale(parameters: p, baselineEV: baselineEV)
         let logLum = engine.makeLogLuminance(from: linear, exposureScale: scale)
@@ -76,7 +77,8 @@ public final class DevelopService: @unchecked Sendable {
         var pixel = [Float](repeating: 0, count: 4)
         context.render(out, toBitmap: &pixel, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
         let geometricMean = pow(2.0, Double(pixel[0]))
-        return PrintTiming.exposureEV(geometricMeanLuminance: geometricMean, target: p.timingTarget, strength: p.timingStrength, limit: p.timingLimit)
+        return PrintTiming.exposureEV(geometricMeanLuminance: geometricMean, target: p.timingTarget, strength: p.timingStrength,
+                                      limit: p.timingLimit, cameraBiasEV: cameraBiasEV)
     }
 
     public func render(_ image: CIImage) -> CGImage? {

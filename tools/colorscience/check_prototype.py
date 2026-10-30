@@ -46,6 +46,8 @@ def main():
     ev = T.timing_exposure_ev(geometric_mean=0.09, target=0.16, strength=0.6, limit=1.25)
     assert 0.4 < ev < 0.6, ev
     assert T.timing_exposure_ev(0.001, 0.16, 1.0, 1.25) == 1.25
+    # the photographer's -1 EV halves the RAW but must not change the timing
+    assert abs(T.timing_exposure_ev(0.045, 0.16, 0.6, 1.25, camera_bias_ev=-1.0) - T.timing_exposure_ev(0.09, 0.16, 0.6, 1.25)) < 1e-12
     # 5. screen flare: Ball's 1:64 lifts the deepest black to about 1/64 of white and leaves white alone
     assert eng.p.screen_flare == 0.0, "the shipped look has no screen flare"
     pf = T.EngineParams(screen_flare=1.0 / 64.0)
