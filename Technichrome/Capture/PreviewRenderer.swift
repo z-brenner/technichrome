@@ -13,6 +13,7 @@ import Metal
 import MetalKit
 import UIKit
 import SwiftUI
+import AVKit
 
 @MainActor
 final class PreviewRenderer: NSObject, MTKViewDelegate {
@@ -122,7 +123,39 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
 
 struct PreviewView: UIViewRepresentable {
     let renderer: PreviewRenderer
+    /// Hardware capture events (volume buttons, the Camera Control button) are routed to `onCaptureEvent`
+    /// while this is true; when false the buttons keep their system behaviour (volume).
+    var captureEventsEnabled = true
+    var onCaptureEvent: () -> Void = {}
 
-    func makeUIView(context: Context) -> MTKView { renderer.makeView() }
-    func updateUIView(_ uiView: MTKView, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> MTKView {
+        let view = renderer.makeView()
+        context.coordinator.onCaptureEvent = onCaptureEvent
+        if #available(iOS 17.2, *) {
+            // Like the system camera: the photograph is taken when the button is released.
+            let interaction = AVCaptureEventInteraction { [weak coordinator = context.coordinator] event in
+                guard event.phase == .ended else { return }
+                coordinator?.onCaptureEvent()
+            }
+            interaction.isEnabled = captureEventsEnabled
+            view.addInteraction(interaction)
+            context.coordinator.interaction = interaction
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: MTKView, context: Context) {
+        context.coordinator.onCaptureEvent = onCaptureEvent
+        if #available(iOS 17.2, *), let interaction = context.coordinator.interaction as? AVCaptureEventInteraction {
+            if interaction.isEnabled != captureEventsEnabled { interaction.isEnabled = captureEventsEnabled }
+        }
+    }
+
+    final class Coordinator {
+        var onCaptureEvent: () -> Void = {}
+        /// `AVCaptureEventInteraction` (iOS 17.2+), type-erased because stored properties cannot be availability-gated.
+        var interaction: (any UIInteraction)?
+    }
 }

@@ -87,11 +87,18 @@ struct CameraView: View {
     }
 
     private func label(for lens: Lens) -> String {
+        if let l = model.camera.lensLabels[lens] { return l.replacingOccurrences(of: "×", with: "") }
         switch lens {
         case .ultraWide: return "0.5"
         case .wide: return "1"
-        case .telephoto: return model.camera.currentLens == .telephoto ? model.camera.zoomLabel.replacingOccurrences(of: "×", with: "") : "T"
+        case .telephoto: return "T"
         }
+    }
+
+    /// Volume buttons and the Camera Control button photograph only while the camera is the active surface;
+    /// under the develop screen or a sheet they keep their system behaviour.
+    private var hardwareShutterEnabled: Bool {
+        model.camera.isConfigured && model.developing == nil && !model.showsLaboratory && !model.showsSettings
     }
 
     private var rawBadge: some View {
@@ -105,7 +112,7 @@ struct CameraView: View {
     private func preview(size: CGSize) -> some View {
         ZStack {
             if let renderer {
-                PreviewView(renderer: renderer)
+                PreviewView(renderer: renderer, captureEventsEnabled: hardwareShutterEnabled) { capture() }
             } else {
                 Rectangle().fill(Color(white: 0.05))
             }

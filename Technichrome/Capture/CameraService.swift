@@ -69,6 +69,8 @@ struct CaptureConfiguration: Sendable {
     var rawKind: RAWKind
     var availableLenses: [Lens]
     var zoomLabel: String
+    /// "0.5×", "1×", "2×"… per available lens, from the fields of view.
+    var lensLabels: [Lens: String] = [:]
 }
 
 @MainActor
@@ -84,12 +86,22 @@ public final class CameraService {
     public private(set) var isCapturing = false
     public private(set) var lastError: String?
     public private(set) var zoomLabel: String = "1×"
+    public private(set) var lensLabels: [Lens: String] = [:]
     /// Whether to also request Apple's processed HEIF alongside the RAW (for the comparison view).
     public var captureCompanionHEIF = true
 
     @ObservationIgnored private let core = CaptureCore()
 
-    public init() {}
+    public init() {
+        // Camera Control (iPhone 16): the exposure slider and the lens picker report here; the core has
+        // already applied the change to the device, so only the published state is updated.
+        core.exposureBiasFromControl = { [weak self] ev in
+            Task { @MainActor in self?.exposureBias = ev }
+        }
+        core.lensFromControl = { [weak self] lens in
+            Task { @MainActor in self?.switchLens(lens) }
+        }
+    }
 
     /// Receives preview frames (BGRA) on the video queue.
     public var frameHandler: (@Sendable (CVPixelBuffer) -> Void)? {
@@ -133,6 +145,7 @@ public final class CameraService {
         rawKind = c.rawKind
         availableLenses = c.availableLenses
         zoomLabel = c.zoomLabel
+        lensLabels = c.lensLabels
     }
 
     // MARK: - Controls
@@ -185,6 +198,17 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     private var configured = false
     private var lastConfiguration = CaptureConfiguration(rawKind: .none, availableLenses: [], zoomLabel: "1×")
     var frameHandler: (@Sendable (CVPixelBuffer) -> Void)?
+
+    // Camera Control (iOS 18, iPhone 16): an exposure-compensation slider and a lens picker, created once
+    // and kept across lens changes. Stored type-erased because stored properties cannot be
+    // availability-gated; every use is behind `#available(iOS 18.0, *)`.
+    private var exposureControl: AnyObject?
+    private var lensControl: AnyObject?
+    private var controlLenses: [Lens] = []
+    private var currentBias: Float = 0
+    /// Called (on the session queue) when the hardware controls change a value.
+    var exposureBiasFromControl: (@Sendable (Float) -> Void)?
+    var lensFromControl: (@Sendable (Lens) -> Void)?
 
     /// How long a capture may take before the continuation is failed (keeps the shutter from locking up
     /// if the delegate is never called).
@@ -284,6 +308,9 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         // Bayer RAW requires videoZoomFactor == 1 on the physical device.
         if (try? dev.lockForConfiguration()) != nil {
             dev.videoZoomFactor = 1.0
+            if currentBias != 0 {
+                dev.setExposureTargetBias(max(dev.minExposureTargetBias, min(dev.maxExposureTargetBias, currentBias)), completionHandler: nil)
+            }
             if dev.activeFormat.isVideoHDRSupported {
                 dev.automaticallyAdjustsVideoHDREnabled = false
                 dev.isVideoHDREnabled = false
@@ -295,8 +322,56 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
 
         configured = true
+        let labels = Dictionary(uniqueKeysWithValues: lenses.map { ($0, Self.zoomLabel(for: $0, devices: discovery.devices)) })
         lastConfiguration = CaptureConfiguration(rawKind: .none, availableLenses: lenses,
-                                                 zoomLabel: Self.zoomLabel(for: lens, devices: discovery.devices))
+                                                 zoomLabel: labels[lens] ?? "1×", lensLabels: labels)
+        installControls(lenses: lenses, labels: labels, current: lens)
+    }
+
+    // MARK: Camera Control
+
+    /// Adds the Camera Control slider and picker (iPhone 16) the first time the session is configured, and
+    /// keeps the picker on the current lens afterwards. Runs inside begin/commitConfiguration on `queue`.
+    private func installControls(lenses: [Lens], labels: [Lens: String], current: Lens) {
+        guard #available(iOS 18.0, *), session.supportsControls else { return }
+        if let picker = lensControl as? AVCaptureIndexPicker {
+            if let i = controlLenses.firstIndex(of: current), picker.selectedIndex != i { picker.selectedIndex = i }
+            return
+        }
+        // Exposure compensation in thirds of a stop, the same range as the on-screen control.
+        let values = (-9...9).map { Float($0) / 3 }
+        let slider = AVCaptureSlider("Exposure", symbolName: "plusminus.circle", values: values)
+        slider.prominentValues = [-2, -1, 0, 1, 2]
+        slider.value = currentBias
+        slider.setActionQueue(queue) { [weak self] value in
+            guard let self else { return }
+            let snapped = (value * 3).rounded() / 3
+            self.currentBias = self.applyExposureBias(snapped)
+            self.exposureBiasFromControl?(self.currentBias)
+        }
+        if session.canAddControl(slider) { session.addControl(slider); exposureControl = slider }
+
+        if lenses.count > 1 {
+            let picker = AVCaptureIndexPicker("Lens", symbolName: "camera.aperture",
+                                              localizedIndexTitles: lenses.map { labels[$0] ?? "1×" })
+            picker.selectedIndex = lenses.firstIndex(of: current) ?? 0
+            picker.setActionQueue(queue) { [weak self] index in
+                guard let self, lenses.indices.contains(index) else { return }
+                self.lensFromControl?(lenses[index])
+            }
+            if session.canAddControl(picker) { session.addControl(picker); lensControl = picker; controlLenses = lenses }
+        }
+        session.setControlsDelegate(self, queue: queue)
+    }
+
+    /// Sets the device's exposure bias (clamped to what it supports) and returns the value applied.
+    @discardableResult
+    private func applyExposureBias(_ ev: Float) -> Float {
+        guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return ev }
+        let v = max(dev.minExposureTargetBias, min(dev.maxExposureTargetBias, ev))
+        dev.setExposureTargetBias(v, completionHandler: nil)
+        dev.unlockForConfiguration()
+        return v
     }
 
     /// RAW policy, decided after the configuration is committed: Bayer first; ProRAW only when the camera
@@ -352,10 +427,11 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
 
     func setExposureBias(_ ev: Float) {
         queue.async { [self] in
-            guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
-            let v = max(dev.minExposureTargetBias, min(dev.maxExposureTargetBias, ev))
-            dev.setExposureTargetBias(v, completionHandler: nil)
-            dev.unlockForConfiguration()
+            currentBias = applyExposureBias(max(-3, min(3, ev)))
+            // Keep the Camera Control slider on the same value (it may only be set on its action queue).
+            if #available(iOS 18.0, *), let slider = exposureControl as? AVCaptureSlider, abs(slider.value - currentBias) > 1e-4 {
+                slider.value = currentBias
+            }
         }
     }
 
@@ -412,6 +488,15 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         frameHandler?(pb)
     }
+}
+
+@available(iOS 18.0, *)
+extension CaptureCore: AVCaptureSessionControlsDelegate {
+    // The controls need a delegate to become active; nothing in the app changes while they are shown.
+    func sessionControlsDidBecomeActive(_ session: AVCaptureSession) {}
+    func sessionControlsWillEnterFullscreenAppearance(_ session: AVCaptureSession) {}
+    func sessionControlsWillExitFullscreenAppearance(_ session: AVCaptureSession) {}
+    func sessionControlsDidBecomeInactive(_ session: AVCaptureSession) {}
 }
 
 /// Collects the RAW and processed photos of one capture request. Completes exactly once.
