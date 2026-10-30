@@ -88,9 +88,11 @@ namespace coreimage {
     /// Final print: display-linear P3 from the dye cube × key transmittance, viewing-condition
     /// compensation, then conversion into the Core Image working space (linear sRGB, extended range).
     ///   m0/m1/m2 : rows of the P3 → working-space matrix
-    float4 tc_print(sample_t printed, sample_t keyT, float surroundExponent, float3 m0, float3 m1, float3 m2)
+    ///   screenFlare : projection flare as a fraction of screen white, (c + f) / (1 + f)
+    float4 tc_print(sample_t printed, sample_t keyT, float surroundExponent, float screenFlare, float3 m0, float3 m1, float3 m2)
     {
         float3 c = saturate(printed.rgb) * keyT.r;
+        c = (c + screenFlare) / (1.0f + screenFlare);
         c = pow(max(c, float3(0.0f)), float3(surroundExponent));
         float3 w = float3(dot(m0, c), dot(m1, c), dot(m2, c));
         return float4(w, 1.0f);

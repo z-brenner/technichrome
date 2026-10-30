@@ -28,7 +28,7 @@ def params_to_swift_json(eng: T.Engine, name="Technichrome v1"):
         "key": curve_json(0.0, p.key_dmax, p.key_gamma, p.key_log_e0, p.key_nu),
         "printDMin": p.print_dmin, "projectorCCT": p.projector_cct,
         "cyan": dye_json(eng.dyes.cyan), "magenta": dye_json(eng.dyes.magenta), "yellow": dye_json(eng.dyes.yellow),
-        "surroundExponent": p.surround_exponent,
+        "surroundExponent": p.surround_exponent, "screenFlare": p.screen_flare,
         "timingStrength": p.timing_strength, "timingTarget": p.timing_target, "timingLimit": p.timing_limit,
         "diffusionSigmaAt4K": p.diffusion_sigma_px_at_4k, "misregistrationAt4K": 0.0,
         "bloomAmount": p.bloom_amount, "bloomThreshold": p.bloom_threshold, "bloomRadiusPercent": p.bloom_radius_pct,
@@ -54,7 +54,7 @@ def swift_literal(eng: T.Engine):
     for name, dye in (("cyan", eng.dyes.cyan), ("magenta", eng.dyes.magenta), ("yellow", eng.dyes.yellow)):
         lobes = ",\n                                  ".join(f"DyeLobe(mu: {l[0]}, sigmaLeft: {l[1]}, sigmaRight: {l[2]}, amplitude: {l[3]:.2f}, shape: {(l[4] if len(l) > 4 else 2.0)})" for l in dye.lobes)
         out.append(f"        {name}: DyeSpectrum(lobes: [{lobes}]),")
-    out.append(f"        surroundExponent: {p.surround_exponent},")
+    out.append(f"        surroundExponent: {p.surround_exponent}, screenFlare: {p.screen_flare},")
     out.append(f"        timingStrength: {p.timing_strength}, timingTarget: {p.timing_target}, timingLimit: {p.timing_limit},")
     out.append(f"        diffusionSigmaAt4K: {p.diffusion_sigma_px_at_4k},")
     return "\n".join(out)

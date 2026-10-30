@@ -51,6 +51,8 @@ public struct ReferencePipeline: Sendable {
     public func develop(sceneLinear rgb: SIMD3<Double>) -> SIMD3<Double> {
         let (dye, k) = densities(sceneLinear: rgb)
         var out = lut.lookup(dye) * pow(10.0, -k)
+        let f = parameters.screenFlare
+        if f > 0 { out = (out + SIMD3(repeating: f)) / (1 + f) }   // projection flare: white stays white
         let g = parameters.surroundExponent
         out = SIMD3(pow(min(max(out.x, 0), 1), g), pow(min(max(out.y, 0), 1), g), pow(min(max(out.z, 0), 1), g))
         return out

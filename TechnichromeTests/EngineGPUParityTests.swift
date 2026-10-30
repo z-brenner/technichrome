@@ -58,13 +58,15 @@ final class EngineGPUParityTests: XCTestCase {
         print("GPU vs CPU reference worst error: \(worst)")
     }
 
-    func testGPUEngineMatchesCPUReferenceWithPrinterLightsAndNoKey() throws {
-        // Exercises the per-matrix light path of the kernel and a key-less (post-1944) print.
+    func testGPUEngineMatchesCPUReferenceWithLightsFlareAndNoKey() throws {
+        // Exercises the per-matrix light path, the screen-flare term of the print kernel and a key-less
+        // (post-1944) print.
         let engine = try TechnichromeEngine(lutDimension: 33)
         let context = CIContext.technichrome()
         var params = EngineParameters.default
         params.dyeLightEV = [0.3, -0.1, 0.15]
         params.keyStrength = 0
+        params.screenFlare = 1.0 / 64.0
         let reference = ReferencePipeline(parameters: params, lutDimension: 33, displaySpace: .displayP3)
         let input = makeImage(samples)
         let output = engine.makeImage(from: input, parameters: params, exposureScale: 1, longEdge: Double(samples.count), spatial: false)

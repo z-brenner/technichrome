@@ -223,6 +223,10 @@ class EngineParams:
     # viewing
     projector_cct: float = 5400.0              # carbon arc ~ daylight-ish; adapted away, only 2nd-order effects remain
     surround_exponent: float = 0.92            # dark-surround print viewed on a bright-surround phone
+    # Screen flare: stray light added to the projected image as a fraction of screen white. Ball (1935)
+    # gives the projected contrast 'from whitest white to blackest black' as about 1 to 64, i.e. 1/64.
+    # Off by default: a phone is not a 1935 projection (see docs/COLOR_SCIENCE.md).
+    screen_flare: float = 0.0
     # print timing: nudge the printer light so the scene's geometric-mean luminance approaches the target
     timing_strength: float = 0.6
     timing_target: float = 0.16
@@ -356,6 +360,9 @@ class Engine:
         else:
             rgb = soft_clip_gamut(self.display_linear_from_densities(norm * np.array(self.p.dye_dmax)))
         rgb = rgb * (10.0 ** (-key))[..., None]
+        if self.p.screen_flare > 0:
+            f = self.p.screen_flare
+            rgb = (rgb + f) / (1.0 + f)             # projection flare: white stays white, black lifts to f/(1+f)
         rgb = np.power(np.clip(rgb, 0.0, 1.0), self.p.surround_exponent)
         return rgb
 

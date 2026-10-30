@@ -57,6 +57,21 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(p, back)
     }
 
+    func testScreenFlareLiftsBlackToTheDocumentedFloorAndKeepsWhite() {
+        XCTAssertEqual(EngineParameters.default.screenFlare, 0, "the shipped look has no screen flare")
+        var p = EngineParameters.default
+        p.screenFlare = 1.0 / 64.0   // Ball (1935): projected contrast about 1 to 64
+        let pipe = ReferencePipeline(parameters: p, lutDimension: 17)
+        let black = pipe.develop(sceneLinear: SIMD3(repeating: 0))
+        let white = pipe.develop(sceneLinear: SIMD3(repeating: 4))
+        let floor = pow(1.0 / 65.0, p.surroundExponent)         // (0 + f) / (1 + f), then the viewing exponent
+        XCTAssertGreaterThan(black.min(), floor * 0.98)
+        XCTAssertLessThan(black.max(), pow(1.0 / 25.0, p.surroundExponent), "the floor is a lift, not a wash")
+        XCTAssertGreaterThan(white.min(), 0.9)
+        let plain = ReferencePipeline(parameters: .default, lutDimension: 17).develop(sceneLinear: SIMD3(repeating: 4))
+        XCTAssertEqual(white.x, plain.x, accuracy: 0.03, "white is unchanged by flare")
+    }
+
     func testSubtractiveRedStaysRed() {
         let pipe = ReferencePipeline(parameters: .default, lutDimension: 17)
         let red = SIMD3(0.42, 0.04, 0.045)

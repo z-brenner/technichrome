@@ -238,6 +238,15 @@ struct LaboratoryView: View {
         Section("Print and projection") {
             slider("Projector colour temperature", $params.projectorCCT, 3200...7000, step: 50, format: "%.0f K")
             slider("Base density", $params.printDMin, 0...0.3, step: 0.005, format: "%.3f")
+            slider("Screen flare (fraction of white)", $params.screenFlare, 0...0.03, step: 0.0005, format: "%.4f")
+            HStack {
+                Text("Ball, 1935: projected contrast \"about 1 to 64\"").font(Theme.body(12)).foregroundStyle(Theme.ivoryDim)
+                Spacer()
+                Button("1:64") { params.screenFlare = 1.0 / 64.0 }
+                Button("off") { params.screenFlare = 0 }
+            }
+            .font(Theme.mono(12))
+            .buttonStyle(.borderless)
             dyeLobeRow("Cyan peak", lobeBinding(\.cyan, 0, \.mu), 580...700)
             dyeLobeRow("Cyan green absorption", lobeBinding(\.cyan, 1, \.amplitude), 0...0.6)
             dyeLobeRow("Cyan blue absorption", lobeBinding(\.cyan, 2, \.amplitude), 0...0.6)
