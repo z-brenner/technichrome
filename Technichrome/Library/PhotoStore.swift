@@ -29,12 +29,45 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
     public var baselineExposure: Double
     /// Extra exposure (stops) chosen for this print on top of the engine's default.
     public var printExposureEV: Double
+    /// Print timing measured at develop time (stops), see PrintTiming.swift.
+    public var printTimingEV: Double
     /// The parameters the print was developed with (nil = app default at the time).
     public var parameters: EngineParameters?
     public var isDeveloped: Bool
 
     public var originalFileName: String { rawKind == .none ? "original.heic" : "original.dng" }
     public var hasRAW: Bool { rawKind != .none }
+    /// Total per-print exposure offset applied on top of the engine parameters.
+    public var totalPrintEV: Double { printExposureEV + printTimingEV }
+
+    public init(id: UUID, capturedAt: Date, rawKind: RAWKind, lens: Lens, pixelWidth: Int, pixelHeight: Int, cameraModel: String?,
+                iso: Float?, exposureDuration: Double?, exposureBias: Float, baselineExposure: Double, printExposureEV: Double,
+                printTimingEV: Double = 0, parameters: EngineParameters?, isDeveloped: Bool) {
+        self.id = id; self.capturedAt = capturedAt; self.rawKind = rawKind; self.lens = lens
+        self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight; self.cameraModel = cameraModel
+        self.iso = iso; self.exposureDuration = exposureDuration; self.exposureBias = exposureBias
+        self.baselineExposure = baselineExposure; self.printExposureEV = printExposureEV; self.printTimingEV = printTimingEV
+        self.parameters = parameters; self.isDeveloped = isDeveloped
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        capturedAt = try c.decode(Date.self, forKey: .capturedAt)
+        rawKind = try c.decodeIfPresent(RAWKind.self, forKey: .rawKind) ?? .none
+        lens = try c.decodeIfPresent(Lens.self, forKey: .lens) ?? .wide
+        pixelWidth = try c.decodeIfPresent(Int.self, forKey: .pixelWidth) ?? 0
+        pixelHeight = try c.decodeIfPresent(Int.self, forKey: .pixelHeight) ?? 0
+        cameraModel = try c.decodeIfPresent(String.self, forKey: .cameraModel)
+        iso = try c.decodeIfPresent(Float.self, forKey: .iso)
+        exposureDuration = try c.decodeIfPresent(Double.self, forKey: .exposureDuration)
+        exposureBias = try c.decodeIfPresent(Float.self, forKey: .exposureBias) ?? 0
+        baselineExposure = try c.decodeIfPresent(Double.self, forKey: .baselineExposure) ?? 0
+        printExposureEV = try c.decodeIfPresent(Double.self, forKey: .printExposureEV) ?? 0
+        printTimingEV = try c.decodeIfPresent(Double.self, forKey: .printTimingEV) ?? 0
+        parameters = try c.decodeIfPresent(EngineParameters.self, forKey: .parameters)
+        isDeveloped = try c.decodeIfPresent(Bool.self, forKey: .isDeveloped) ?? false
+    }
 }
 
 @MainActor

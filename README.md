@@ -52,6 +52,14 @@ The Metal file is compiled as a Core Image kernel library (`MTL_COMPILER_FLAGS =
 `MTLLINKER_FLAGS = -cikernel`, already set in the project). If you add ordinary Metal compute shaders,
 put them in a second target.
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs three jobs: the Swift core tests on Linux, the Python prototype checks
+(the committed parity fixture must reproduce from the prototype's defaults, and the look invariants must
+hold), and, on pull requests and manual dispatch only, an unsigned `xcodebuild` of the iOS target on a
+macOS runner. The macOS job is the first real compile of the iOS sources; it is gated to pull requests
+because macOS minutes are billed at 10× on private repositories.
+
 ### Testing the colour science without Xcode
 
 The engine core is plain Swift. On macOS or Linux with a Swift 5.9+ toolchain:
@@ -71,6 +79,7 @@ python3 make_charts.py out/                      # ColorChecker, hue sweep, grey
 python3 develop_dng.py photo.dng out/photo --autoexpose   # real iPhone DNG → print (LibRaw linear decode)
 python3 develop_png.py out/ image.png            # display-referred test images
 python3 fit_tone.py                              # refit the tone scale to the target grey scale
+python3 check_prototype.py                       # what CI runs: fixture reproduction + invariants
 python3 set_params.py mat_gamma=3.2 --calibrate  # edit defaults, recalibrate neutral dye gains
 python3 sync_swift.py                            # push the defaults into EngineParameters.swift
 ```
@@ -85,7 +94,10 @@ screen builds the print in dye order. Nothing else competes with the photograph.
 
 This repository was produced without access to a Mac, Xcode or an iPhone. What has been verified:
 
-* The colour-science core compiles and its tests pass on Linux (Swift 6.1 toolchain, Swift 5 language mode).
+* The colour-science core compiles and its tests pass on Linux (Swift 6.1 toolchain, Swift 5 language mode): 19 tests.
+* A self-review pass found and fixed: alpha summing in the misregistration path, RAW formats queried before the
+  session configuration was committed, a capture continuation that could lock the shutter, a triple full-resolution
+  render in the develop step, main-thread file writes, and an undismissable alert.
 * The Swift engine matches the Python prototype to 1e-7 on 32 sample colours.
 * The look was developed on real iPhone Bayer DNGs (LibRaw decode) and on standard test images; charts and
   renders live in `tools/colorscience` outputs.
@@ -98,8 +110,8 @@ What has **not** been verified and needs a device:
   against the documented APIs and reviewed for isolation rules, but a first build on a Mac will probably
   surface a handful of small fixes.
 * That `CIRAWFilter` at `boostAmount = 0` places diffuse white where the engine expects it. The Python
-  path uses LibRaw; Apple's decoder may differ by a constant exposure offset. Adjust `exposureEV` in the
-  Laboratory and make it the default.
+  path uses LibRaw; Apple's decoder may differ by a constant exposure offset. Print timing absorbs most of
+  it; adjust `exposureEV` in the Laboratory for the rest and make it the default.
 * Bayer RAW availability per device/lens, 12 MP vs 48 MP behaviour, and ProRAW fallback.
 * Live-preview performance (Core Image graph on 1080p frames at 30 fps) and full-resolution develop time/memory.
 * The Photos export pairing (print JPEG + DNG as separate assets).

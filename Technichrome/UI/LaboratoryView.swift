@@ -8,6 +8,7 @@
 
 import SwiftUI
 import CoreImage
+import PhotosUI
 
 struct LaboratoryView: View {
     @Environment(AppModel.self) private var model
@@ -21,6 +22,9 @@ struct LaboratoryView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var exportURL: URL?
+    @State private var referenceItem: PhotosPickerItem?
+    @State private var referenceImage: UIImage?
+    @State private var splitFraction: CGFloat = 0.5
 
     var body: some View {
         NavigationStack {
@@ -51,6 +55,7 @@ struct LaboratoryView: View {
         }
         .onAppear { params = model.parameters; loadSource() }
         .onChange(of: params) { _, _ in scheduleRender() }
+        .onChange(of: referenceItem) { _, item in loadReference(item) }
         .alert("Laboratory", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
     }
 
@@ -60,40 +65,77 @@ struct LaboratoryView: View {
         ZStack {
             Color(white: 0.04)
             if let preview {
-                Image(decorative: preview, scale: 1, orientation: .up).resizable().scaledToFit()
+                if let referenceImage {
+                    SplitCompareView(left: Image(decorative: preview, scale: 1, orientation: .up), right: Image(uiImage: referenceImage), fraction: $splitFraction)
+                } else {
+                    Image(decorative: preview, scale: 1, orientation: .up).resizable().scaledToFit()
+                }
             } else {
                 TCLabel(record == nil ? "take a photograph to see it here" : "rendering", size: 10)
             }
             if busy {
                 VStack { Spacer(); HStack { Spacer(); ProgressView().tint(Theme.ivory).padding(10) } }
             }
+            VStack {
+                HStack {
+                    Spacer()
+                    PhotosPicker(selection: $referenceItem, matching: .images) {
+                        TCLabel(referenceImage == nil ? "reference frame" : "change reference", size: 9, color: Theme.ivory, tracking: 1.5)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Capsule().fill(Color.black.opacity(0.55)))
+                    }
+                    if referenceImage != nil {
+                        Button { referenceImage = nil; referenceItem = nil } label: {
+                            Image(systemName: "xmark").font(.system(size: 11, weight: .light)).foregroundStyle(Theme.ivory)
+                                .padding(8).background(Circle().fill(Color.black.opacity(0.55)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+                Spacer()
+            }
         }
         .frame(height: 260)
+    }
+
+    /// Loads a reference frame (a scan of a dye-transfer print, a frame from a restoration) chosen from Photos,
+    /// to be compared side by side with the live print preview.
+    private func loadReference(_ item: PhotosPickerItem?) {
+        guard let item else { referenceImage = nil; return }
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self), let ui = UIImage(data: data) {
+                referenceImage = ui
+            } else {
+                message = "That image could not be loaded."
+            }
+        }
     }
 
     private func loadSource() {
         guard let record, let dev = model.develop else { return }
         let store = model.store
         Task.detached(priority: .userInitiated) {
-            if let (img, baseline) = try? dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true) {
-                let longEdge = Double(max(img.extent.width, img.extent.height))
-                await MainActor.run {
-                    linearCache = (img, baseline, longEdge)
-                    scheduleRender()
-                }
+            guard let source = try? dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true) else { return }
+            let (img, baseline) = source
+            let longEdge = Double(max(img.extent.width, img.extent.height))
+            await MainActor.run {
+                linearCache = (img, baseline, longEdge)
+                scheduleRender()
             }
         }
     }
 
     private func scheduleRender() {
         renderTask?.cancel()
-        guard let (img, baseline, longEdge) = linearCache, let dev = model.develop, let record else { return }
+        guard let cache = linearCache, let dev = model.develop, let record else { return }
+        let (img, baseline, longEdge) = cache
         let p = params
         busy = true
         renderTask = Task.detached(priority: .userInitiated) {
             try? await Task.sleep(for: .milliseconds(60))
             if Task.isCancelled { return }
-            let out = dev.makePrint(linear: img, baselineEV: baseline, parameters: p, extraEV: record.printExposureEV, fullLongEdge: longEdge)
+            let out = dev.makePrint(linear: img, baselineEV: baseline, parameters: p, extraEV: record.totalPrintEV, fullLongEdge: longEdge)
             let cg = dev.render(out)
             if Task.isCancelled { return }
             await MainActor.run { preview = cg; busy = false }
@@ -106,6 +148,12 @@ struct LaboratoryView: View {
         Section("Exposure") {
             slider("Print exposure", $params.exposureEV, -2...2, step: 0.05, format: "%+.2f EV")
             slider("Viewing compensation", $params.surroundExponent, 0.7...1.1, step: 0.01, format: "γ %.2f")
+            slider("Timing strength", $params.timingStrength, 0...1, step: 0.05, format: "%.2f")
+            slider("Timing target (scene key)", $params.timingTarget, 0.08...0.3, step: 0.005, format: "%.3f")
+            if let record {
+                Text(String(format: "This photograph was timed %+.2f EV at develop time; the preview uses that value.", record.printTimingEV))
+                    .font(.footnote).foregroundStyle(Theme.ivoryDim)
+            }
         }
     }
 
@@ -233,7 +281,7 @@ struct LaboratoryView: View {
         busy = true
         Task.detached(priority: .userInitiated) {
             do {
-                let result = try dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.printExposureEV)
+                let result = try dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.totalPrintEV)
                 await MainActor.run {
                     var r = record
                     r.parameters = p; r.isDeveloped = true; r.baselineExposure = result.baselineExposure
@@ -255,6 +303,32 @@ struct LaboratoryView: View {
             exportURL = url
         } catch {
             message = error.localizedDescription
+        }
+    }
+}
+
+
+/// Two images sharing one frame, divided by a draggable line: the print on the left, the reference on the right.
+struct SplitCompareView: View {
+    let left: Image
+    let right: Image
+    @Binding var fraction: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            ZStack(alignment: .leading) {
+                right.resizable().scaledToFit().frame(width: w, height: geo.size.height)
+                left.resizable().scaledToFit().frame(width: w, height: geo.size.height)
+                    .mask(alignment: .leading) { Rectangle().frame(width: w * fraction) }
+                Rectangle().fill(Theme.ivory).frame(width: 1).offset(x: w * fraction)
+                VStack { Spacer(); TCLabel("print", size: 8); Spacer() }.padding(.leading, 6)
+                VStack { Spacer(); HStack { Spacer(); TCLabel("reference", size: 8).padding(.trailing, 6) }; Spacer() }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 4).onChanged { v in
+                fraction = min(max(v.location.x / w, 0.02), 0.98)
+            })
         }
     }
 }

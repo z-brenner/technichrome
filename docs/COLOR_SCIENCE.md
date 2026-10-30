@@ -111,6 +111,16 @@ neutrally and sharpen edges, not enough to flatten the reds the way the full key
 Three of the four films named in the brief (Black Narcissus 1947, The Red Shoes 1948, Singin' in the
 Rain 1952) are post-key prints; set it to 0 for that era, 0.5–1.0 for a 1930s print.
 
+### Print timing — a laboratory practice, modelled
+
+A laboratory never printed every negative with the same light: a timer chose printer lights per
+scene. A RAW file's absolute brightness depends on the camera's auto-exposure (iPhones protect
+highlights, so RAW frames often sit low), so before printing, the engine measures the scene's
+geometric-mean luminance (after the DNG baseline exposure) and moves the print exposure toward a
+target key of 0.16, by 60 % of the distance and never more than ±1.25 stops. Strength 0 turns it
+off; the measured value is stored with each photograph and shown in the Laboratory. The target and
+strength are approximations to be checked on hardware against the LibRaw path used for tuning.
+
 ### [6] Dyes — approximation informed by the literature
 
 No spectral curves of Technicolor's dyes are publicly tabulated as far as we know. We model each dye

@@ -55,6 +55,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
     private let printKernel: CIColorKernel
     private let linearViewKernel: CIColorKernel
     private let pickChannelsKernel: CIColorKernel
+    private let logLuminanceKernel: CIColorKernel
 
     private let lutLock = NSLock()
     private var lutCache: (key: PrintModelKey, cube: Data, dimension: Int)?
@@ -78,6 +79,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
         printKernel = try load("tc_print")
         linearViewKernel = try load("tc_linear_view")
         pickChannelsKernel = try load("tc_pick_channels")
+        logLuminanceKernel = try load("tc_log_luminance")
         self.lutDimension = lutDimension
     }
 
@@ -175,6 +177,11 @@ public final class TechnichromeEngine: @unchecked Sendable {
         func mrow(_ i: Int) -> CIVector { CIVector(x: CGFloat(m[i, 0]), y: CGFloat(m[i, 1]), z: CGFloat(m[i, 2])) }
         let out = printKernel.apply(extent: extent, arguments: [printed, keyT, Float(p.surroundExponent), mrow(0), mrow(1), mrow(2)])
         return out ?? printed
+    }
+
+    /// log2(luminance) per pixel of a scene-linear image (red channel), for print timing.
+    public func makeLogLuminance(from input: CIImage, exposureScale: Float) -> CIImage {
+        logLuminanceKernel.apply(extent: input.extent, arguments: [input, exposureScale]) ?? input
     }
 
     /// A plain linear rendering of the same input (for the comparison view): exposure only.

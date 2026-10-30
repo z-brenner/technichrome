@@ -27,15 +27,24 @@ struct GalleryView: View {
                     TCLabel("\(model.store.records.count) photographs", size: 9)
                 }
                 Spacer()
-                Button {
-                    model.selectedPhoto = model.store.records.first
-                    model.showsLaboratory = true
-                } label: {
-                    Image(systemName: "slider.horizontal.3").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.ivoryDim)
-                        .frame(width: 44, height: 44)
+                HStack(spacing: 0) {
+                    Button {
+                        model.showsSettings = true
+                    } label: {
+                        Image(systemName: "gearshape").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.ivoryDim)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        model.selectedPhoto = model.store.records.first
+                        model.showsLaboratory = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.ivoryDim)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.store.records.isEmpty)
                 }
-                .buttonStyle(.plain)
-                .disabled(model.store.records.isEmpty)
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)

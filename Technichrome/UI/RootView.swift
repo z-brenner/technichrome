@@ -26,6 +26,11 @@ struct RootView: View {
             DevelopView(record: record)
                 .environment(model)
         }
+        .sheet(isPresented: $model.showsSettings) {
+            SettingsView()
+                .environment(model)
+                .presentationDetents([.medium, .large])
+        }
         .sheet(isPresented: $model.showsLaboratory) {
             LaboratoryView(record: model.selectedPhoto ?? model.store.records.first)
                 .environment(model)

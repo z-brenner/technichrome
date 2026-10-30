@@ -115,6 +115,14 @@ public struct EngineParameters: Codable, Equatable, Sendable {
     /// Applied as a power on display-linear values (1 = none).
     public var surroundExponent: Double
 
+    // MARK: Print timing (see PrintTiming.swift)
+    /// 0 = fixed printer light; 1 = fully re-time every scene to the target key.
+    public var timingStrength: Double
+    /// Target geometric-mean scene luminance (a normally exposed scene sits near 0.16–0.18).
+    public var timingTarget: Double
+    /// Maximum correction in stops, either way.
+    public var timingLimit: Double
+
     // MARK: Spatial stages
     /// Dye diffusion in the gelatin: Gaussian σ in pixels for a 4000 px long edge (scaled with size).
     public var diffusionSigmaAt4K: Double
@@ -134,6 +142,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         dyeDMax: [Double], dyeGain: [Double], matrixGamma: Double, matrixLogE0: Double, matrixNu: Double,
         keyStrength: Double, key: CurveParameters, printDMin: Double, projectorCCT: Double,
         cyan: DyeSpectrum, magenta: DyeSpectrum, yellow: DyeSpectrum, surroundExponent: Double,
+        timingStrength: Double = 0.6, timingTarget: Double = 0.16, timingLimit: Double = 1.25,
         diffusionSigmaAt4K: Double, misregistrationAt4K: Double, bloomAmount: Double, bloomThreshold: Double, bloomRadiusPercent: Double,
         name: String
     ) {
@@ -141,9 +150,44 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         self.dyeDMax = dyeDMax; self.dyeGain = dyeGain; self.matrixGamma = matrixGamma; self.matrixLogE0 = matrixLogE0
         self.matrixNu = matrixNu; self.keyStrength = keyStrength; self.key = key
         self.printDMin = printDMin; self.projectorCCT = projectorCCT; self.cyan = cyan; self.magenta = magenta; self.yellow = yellow
-        self.surroundExponent = surroundExponent; self.diffusionSigmaAt4K = diffusionSigmaAt4K
+        self.surroundExponent = surroundExponent
+        self.timingStrength = timingStrength; self.timingTarget = timingTarget; self.timingLimit = timingLimit
+        self.diffusionSigmaAt4K = diffusionSigmaAt4K
         self.misregistrationAt4K = misregistrationAt4K; self.bloomAmount = bloomAmount; self.bloomThreshold = bloomThreshold
         self.bloomRadiusPercent = bloomRadiusPercent; self.name = name
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = EngineParameters.technichromeV1
+        exposureEV = try c.decodeIfPresent(Double.self, forKey: .exposureEV) ?? d.exposureEV
+        separationMatrix = try c.decodeIfPresent([Double].self, forKey: .separationMatrix) ?? d.separationMatrix
+        negative = try c.decodeIfPresent(CurveParameters.self, forKey: .negative) ?? d.negative
+        dyeDMax = try c.decodeIfPresent([Double].self, forKey: .dyeDMax) ?? d.dyeDMax
+        dyeGain = try c.decodeIfPresent([Double].self, forKey: .dyeGain) ?? d.dyeGain
+        matrixGamma = try c.decodeIfPresent(Double.self, forKey: .matrixGamma) ?? d.matrixGamma
+        matrixLogE0 = try c.decodeIfPresent(Double.self, forKey: .matrixLogE0) ?? d.matrixLogE0
+        matrixNu = try c.decodeIfPresent(Double.self, forKey: .matrixNu) ?? d.matrixNu
+        keyStrength = try c.decodeIfPresent(Double.self, forKey: .keyStrength) ?? d.keyStrength
+        key = try c.decodeIfPresent(CurveParameters.self, forKey: .key) ?? d.key
+        printDMin = try c.decodeIfPresent(Double.self, forKey: .printDMin) ?? d.printDMin
+        projectorCCT = try c.decodeIfPresent(Double.self, forKey: .projectorCCT) ?? d.projectorCCT
+        cyan = try c.decodeIfPresent(DyeSpectrum.self, forKey: .cyan) ?? d.cyan
+        magenta = try c.decodeIfPresent(DyeSpectrum.self, forKey: .magenta) ?? d.magenta
+        yellow = try c.decodeIfPresent(DyeSpectrum.self, forKey: .yellow) ?? d.yellow
+        surroundExponent = try c.decodeIfPresent(Double.self, forKey: .surroundExponent) ?? d.surroundExponent
+        timingStrength = try c.decodeIfPresent(Double.self, forKey: .timingStrength) ?? d.timingStrength
+        timingTarget = try c.decodeIfPresent(Double.self, forKey: .timingTarget) ?? d.timingTarget
+        timingLimit = try c.decodeIfPresent(Double.self, forKey: .timingLimit) ?? d.timingLimit
+        diffusionSigmaAt4K = try c.decodeIfPresent(Double.self, forKey: .diffusionSigmaAt4K) ?? d.diffusionSigmaAt4K
+        misregistrationAt4K = try c.decodeIfPresent(Double.self, forKey: .misregistrationAt4K) ?? d.misregistrationAt4K
+        bloomAmount = try c.decodeIfPresent(Double.self, forKey: .bloomAmount) ?? d.bloomAmount
+        bloomThreshold = try c.decodeIfPresent(Double.self, forKey: .bloomThreshold) ?? d.bloomThreshold
+        bloomRadiusPercent = try c.decodeIfPresent(Double.self, forKey: .bloomRadiusPercent) ?? d.bloomRadiusPercent
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? d.name
+        guard separationMatrix.count == 9, dyeDMax.count == 3, dyeGain.count == 3 else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "separationMatrix must have 9 values and dyeDMax/dyeGain 3"))
+        }
     }
 
     /// The matrix-film curve for dye `i` (0 = cyan, 1 = magenta, 2 = yellow).
@@ -182,6 +226,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         yellow: DyeSpectrum(lobes: [DyeLobe(mu: 445.0, sigmaLeft: 45.0, sigmaRight: 40.0, amplitude: 1.00, shape: 3.5),
                                   DyeLobe(mu: 505.0, sigmaLeft: 15.0, sigmaRight: 30.0, amplitude: 0.08, shape: 2.0)]),
         surroundExponent: 0.92,
+        timingStrength: 0.6, timingTarget: 0.16, timingLimit: 1.25,
         diffusionSigmaAt4K: 1.1,
         misregistrationAt4K: 0.0,
         bloomAmount: 0.0, bloomThreshold: 0.85, bloomRadiusPercent: 1.5,

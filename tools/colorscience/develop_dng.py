@@ -72,7 +72,8 @@ if __name__ == '__main__':
     ap.add_argument('--ev', type=float, default=0.0)
     ap.add_argument('--max', type=int, default=1600)
     ap.add_argument('--params', default=None)
-    ap.add_argument('--autoexpose', action='store_true', help='scale so that the 99.5th percentile luminance = 1.0')
+    ap.add_argument('--autoexpose', action='store_true', help='scale so that the 99.5th percentile luminance = 1.0 (instead of timing)')
+    ap.add_argument('--no-timing', action='store_true', help='disable print timing')
     a = ap.parse_args()
     lin = decode_linear(a.dng, a.max)
     if a.autoexpose:
@@ -82,6 +83,11 @@ if __name__ == '__main__':
         print('auto-exposure scale', round(k, 3))
     lin = lin * 2 ** a.ev
     params = T.EngineParams()
+    if not a.autoexpose and not a.no_timing:
+        g = T.geometric_mean_luminance(lin)
+        tev = T.timing_exposure_ev(g, params.timing_target, params.timing_strength, params.timing_limit)
+        print(f'print timing: geometric mean {g:.4f} -> {tev:+.2f} EV')
+        lin = lin * 2 ** tev
     if a.params:
         d = json.load(open(a.params))
         for k, v in d.items():

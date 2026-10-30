@@ -144,26 +144,31 @@ struct DevelopView: View {
         let params = model.parameters
         let store = model.store
         let rec = record
-        // Quick preview stages at reduced scale
-        let stages = await Task.detached(priority: .userInitiated) { () -> [Stage: CGImage] in
+        // Print timing and quick preview stages at reduced scale
+        let (stages, timing) = await Task.detached(priority: .userInitiated) { () -> ([Stage: CGImage], Double) in
             do {
                 let (linear, baseline) = try dev.linearSource(for: rec, store: store, scaleFactor: 0.25, draft: true)
+                let timing = dev.measureTiming(linear: linear, baselineEV: baseline, parameters: params)
                 let longEdge = Double(max(linear.extent.width, linear.extent.height))
                 var out: [Stage: CGImage] = [:]
                 for s in [Stage.key, .yellow, .cyan, .magenta] {
-                    let img = dev.makePrint(linear: linear, baselineEV: baseline, parameters: params, extraEV: rec.printExposureEV,
+                    let img = dev.makePrint(linear: linear, baselineEV: baseline, parameters: params, extraEV: rec.printExposureEV + timing,
                                             fullLongEdge: longEdge, dyeMask: s.mask, spatial: false)
                     if let cg = dev.render(img) { out[s] = cg }
                 }
-                return out
+                return (out, timing)
             } catch {
-                return [:]
+                return ([:], 0)
             }
         }.value
         stageImages = stages
+        var timed = rec
+        timed.printTimingEV = timing
+        try? store.save(timed)
+        let timedRecord = timed
         // Play the reveal while the full-resolution develop runs
         let full = Task.detached(priority: .userInitiated) { () throws -> DevelopedImage in
-            try dev.developToDisk(record: rec, store: store, parameters: params, extraEV: rec.printExposureEV)
+            try dev.developToDisk(record: timedRecord, store: store, parameters: params, extraEV: timedRecord.totalPrintEV)
         }
         for s in [Stage.yellow, .cyan, .magenta] {
             try? await Task.sleep(for: .milliseconds(520))
@@ -176,7 +181,7 @@ struct DevelopView: View {
         do {
             let result = try await full.value
             finalImage = result.image
-            var updated = rec
+            var updated = timedRecord
             updated.isDeveloped = true
             updated.baselineExposure = result.baselineExposure
             updated.parameters = params
@@ -191,7 +196,7 @@ struct DevelopView: View {
     private func save() {
         Task {
             do {
-                try await ExportService.saveToPhotos(record: record, store: model.store, includeRAW: true)
+                try await ExportService.saveToPhotos(record: record, store: model.store, includeRAW: model.settings.saveRAWWithPrint)
                 saved = true
                 Haptics.success()
             } catch {
