@@ -294,17 +294,20 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
     }
 
+    /// Rebuilds the session for a lens or a photo-size change. A session that was stopped (the camera view
+    /// is away) stays stopped: the next `start` runs it with the new configuration.
     func reconfigure(lens: Lens) async throws -> CaptureConfiguration {
         try await withCheckedThrowingContinuation { cont in
             queue.async { [self] in
                 do {
+                    let wasRunning = session.isRunning
                     session.beginConfiguration()
                     if let old = videoInput { session.removeInput(old); videoInput = nil }
                     configured = false
                     session.commitConfiguration()
                     try configureSession(lens: lens)
                     applyRAWPolicy()
-                    if !session.isRunning { session.startRunning() }
+                    if wasRunning, !session.isRunning { session.startRunning() }
                     cont.resume(returning: lastConfiguration)
                 } catch {
                     cont.resume(throwing: error)
