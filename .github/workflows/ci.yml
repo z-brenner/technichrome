@@ -18,7 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: swift test
-        run: swift test 2>&1 | tail -40
+        shell: bash
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tail -60
 
   prototype:
     name: Python prototype checks
