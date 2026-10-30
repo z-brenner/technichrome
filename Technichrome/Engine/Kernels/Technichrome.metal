@@ -49,12 +49,12 @@ namespace coreimage {
     /// Scene-linear RGB (+ glow) → normalised dye densities. RGB = (cyan, magenta, yellow) in [0,1].
     ///   sepR/sepG/sepB : rows of the separation matrix (red, green, blue record)
     ///   neg            : (a, logE0, dMin, span) of the negative curve;  negShape: (xHalf, nu)
-    ///   mat            : (a, logE0, xHalf, nu) of the matrix curve;  dyeDMax, dyeGain per dye
+    ///   mat            : (a, logE0, xHalf, nu) of the matrix curve;  dyeDMax, dyeGain, dyeLight (log10 units) per dye
     ///   dyeMask        : 1 = dye transferred, 0 = matrix withheld (used by the develop reveal)
     float4 tc_separate(sample_t src, sample_t glow, float bloomAmount, float exposureScale,
                        float3 sepR, float3 sepG, float3 sepB,
                        float4 neg, float2 negShape,
-                       float4 mat, float3 dyeDMax, float3 dyeGain, float3 dyeMask)
+                       float4 mat, float3 dyeDMax, float3 dyeGain, float3 dyeLight, float3 dyeMask)
     {
         float3 e = tc_scene_exposure(src.rgb, glow.rgb, bloomAmount, exposureScale);
         float3 s = float3(dot(sepR, e), dot(sepG, e), dot(sepB, e));
@@ -63,7 +63,7 @@ namespace coreimage {
         dn.x = tc_curve(logS.x, neg.x, neg.y, neg.z, neg.w, negShape.x, negShape.y);
         dn.y = tc_curve(logS.y, neg.x, neg.y, neg.z, neg.w, negShape.x, negShape.y);
         dn.z = tc_curve(logS.z, neg.x, neg.y, neg.z, neg.w, negShape.x, negShape.y);
-        float3 logPrint = -dn;
+        float3 logPrint = -dn + dyeLight;
         float3 dye;
         dye.x = tc_curve(logPrint.x, mat.x, mat.y, 0.0f, dyeDMax.x, mat.z, mat.w) * dyeGain.x / dyeDMax.x;
         dye.y = tc_curve(logPrint.y, mat.x, mat.y, 0.0f, dyeDMax.y, mat.z, mat.w) * dyeGain.y / dyeDMax.y;

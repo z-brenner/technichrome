@@ -29,6 +29,11 @@
    0.9153,
    0.8884
   ],
+  "dyeLightEV": [
+   0.0,
+   0.0,
+   0.0
+  ],
   "matrixGamma": 3.2176,
   "matrixLogE0": -1.0621,
   "matrixNu": 0.0253,

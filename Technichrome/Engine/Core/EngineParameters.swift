@@ -87,8 +87,11 @@ public struct EngineParameters: Codable, Equatable, Sendable {
     // MARK: Matrices and dye transfer
     /// Peak density of each dye (cyan, magenta, yellow) at full transfer.
     public var dyeDMax: [Double]
-    /// Technicolor's per-matrix "colour control": multiplies the transferred density of each dye.
+    /// Density multiplier per dye (kept at 1; the print is balanced with the printer lights below).
     public var dyeGain: [Double]
+    /// Printer light per matrix in stops: how a laboratory balanced a print so greys print neutral.
+    /// Positive = more light through that negative = more of that dye. Calibrated by the prototype.
+    public var dyeLightEV: [Double]
     /// Matrix-film characteristic (positive relief → dye density). dMin/dMax are taken from dyeDMax.
     public var matrixGamma: Double
     public var matrixLogE0: Double
@@ -139,7 +142,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
 
     public init(
         exposureEV: Double, separationMatrix: [Double], negative: CurveParameters,
-        dyeDMax: [Double], dyeGain: [Double], matrixGamma: Double, matrixLogE0: Double, matrixNu: Double,
+        dyeDMax: [Double], dyeGain: [Double], dyeLightEV: [Double] = [0, 0, 0], matrixGamma: Double, matrixLogE0: Double, matrixNu: Double,
         keyStrength: Double, key: CurveParameters, printDMin: Double, projectorCCT: Double,
         cyan: DyeSpectrum, magenta: DyeSpectrum, yellow: DyeSpectrum, surroundExponent: Double,
         timingStrength: Double = 0.6, timingTarget: Double = 0.16, timingLimit: Double = 1.25,
@@ -147,7 +150,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         name: String
     ) {
         self.exposureEV = exposureEV; self.separationMatrix = separationMatrix; self.negative = negative
-        self.dyeDMax = dyeDMax; self.dyeGain = dyeGain; self.matrixGamma = matrixGamma; self.matrixLogE0 = matrixLogE0
+        self.dyeDMax = dyeDMax; self.dyeGain = dyeGain; self.dyeLightEV = dyeLightEV; self.matrixGamma = matrixGamma; self.matrixLogE0 = matrixLogE0
         self.matrixNu = matrixNu; self.keyStrength = keyStrength; self.key = key
         self.printDMin = printDMin; self.projectorCCT = projectorCCT; self.cyan = cyan; self.magenta = magenta; self.yellow = yellow
         self.surroundExponent = surroundExponent
@@ -165,6 +168,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         negative = try c.decodeIfPresent(CurveParameters.self, forKey: .negative) ?? d.negative
         dyeDMax = try c.decodeIfPresent([Double].self, forKey: .dyeDMax) ?? d.dyeDMax
         dyeGain = try c.decodeIfPresent([Double].self, forKey: .dyeGain) ?? d.dyeGain
+        dyeLightEV = try c.decodeIfPresent([Double].self, forKey: .dyeLightEV) ?? d.dyeLightEV
         matrixGamma = try c.decodeIfPresent(Double.self, forKey: .matrixGamma) ?? d.matrixGamma
         matrixLogE0 = try c.decodeIfPresent(Double.self, forKey: .matrixLogE0) ?? d.matrixLogE0
         matrixNu = try c.decodeIfPresent(Double.self, forKey: .matrixNu) ?? d.matrixNu
@@ -185,8 +189,8 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         bloomThreshold = try c.decodeIfPresent(Double.self, forKey: .bloomThreshold) ?? d.bloomThreshold
         bloomRadiusPercent = try c.decodeIfPresent(Double.self, forKey: .bloomRadiusPercent) ?? d.bloomRadiusPercent
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? d.name
-        guard separationMatrix.count == 9, dyeDMax.count == 3, dyeGain.count == 3 else {
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "separationMatrix must have 9 values and dyeDMax/dyeGain 3"))
+        guard separationMatrix.count == 9, dyeDMax.count == 3, dyeGain.count == 3, dyeLightEV.count == 3 else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "separationMatrix must have 9 values and dyeDMax/dyeGain/dyeLightEV 3"))
         }
     }
 
@@ -212,6 +216,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         negative: CurveParameters(dMin: 0.12, dMax: 2.2, gamma: 0.4500, logE0: -1.0539, nu: 0.2001),
         dyeDMax: [2.8, 2.8, 2.8],
         dyeGain: [1.1963, 0.9153, 0.8884],
+        dyeLightEV: [0.0000, 0.0000, 0.0000],
         matrixGamma: 3.2176, matrixLogE0: -1.0621, matrixNu: 0.0253,
         keyStrength: 0.15,
         key: CurveParameters(dMin: 0, dMax: 1.1, gamma: 0.9, logE0: -1.05, nu: 0.5),

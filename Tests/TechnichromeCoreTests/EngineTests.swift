@@ -65,3 +65,26 @@ final class EngineTests: XCTestCase {
         XCTAssertGreaterThan(out.x, out.z * 2.5)
     }
 }
+
+final class PrinterLightTests: XCTestCase {
+    func testMoreLightOnTheCyanMatrixDarkensRed() {
+        var p = EngineParameters.default
+        let base = ReferencePipeline(parameters: p, lutDimension: 17).develop(sceneLinear: SIMD3(repeating: 0.3))
+        p.dyeLightEV = [0.5, 0, 0]
+        let lit = ReferencePipeline(parameters: p, lutDimension: 17).develop(sceneLinear: SIMD3(repeating: 0.3))
+        XCTAssertLessThan(lit.x, base.x - 0.02, "more cyan dye must absorb more red")
+        // Cyan's unwanted absorptions take some green and blue too, but red must fall the most.
+        XCTAssertLessThan(lit.x / base.x, lit.y / base.y)
+        XCTAssertLessThan(lit.x / base.x, lit.z / base.z)
+    }
+
+    func testEqualLightsOnAllMatricesActLikeExposure() {
+        var p = EngineParameters.default
+        let base = ReferencePipeline(parameters: p, lutDimension: 17).develop(sceneLinear: SIMD3(repeating: 0.3))
+        p.dyeLightEV = [0.25, 0.25, 0.25]
+        let lit = ReferencePipeline(parameters: p, lutDimension: 17).develop(sceneLinear: SIMD3(repeating: 0.3))
+        // More light on every matrix = a darker print, still neutral.
+        XCTAssertLessThan((lit.x + lit.y + lit.z), (base.x + base.y + base.z))
+        XCTAssertLessThan(abs(lit.x - lit.y) / lit.y, 0.12)
+    }
+}

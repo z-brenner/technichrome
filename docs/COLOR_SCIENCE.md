@@ -103,8 +103,13 @@ was fitted (`fit_tone.py`) to a projection-print target rendered for a phone: di
 ~0.81 display-linear, mid grey at ~0.19, a slope of about 1.5 through the shadows, and blacks that
 drop into density — Ball's "low exposures tend to drop into black".
 
-Technicolor balanced prints so greys printed neutral; the engine does the same by solving for the
-three dye gains (`calibrate_neutral`), which land at 1.196 / 0.915 / 0.888 for the chosen dyes.
+Technicolor balanced prints so greys printed neutral. The engine has the two controls a laboratory
+had: per-matrix **printer lights** (an exposure shift of each matrix curve, in stops) and per-matrix
+**contrast** (a density multiplier, Technicolor's "colour control"). Balanced with lights alone, this
+model reproduces the classic crossover — cyan highlights and reddish shadows — that period sources
+describe as blacks with unwanted hues; so the shipped preset is balanced with the contrast multipliers
+(`calibrate_neutral`: 1.196 / 0.915 / 0.888 for the chosen dyes) and the lights sit at zero, available
+in the Laboratory.
 
 The key image is on by default at 0.15 of the documented "50 %" strength — enough to deepen blacks
 neutrally and sharpen edges, not enough to flatten the reds the way the full key did in the 1930s.

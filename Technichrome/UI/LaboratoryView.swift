@@ -196,15 +196,24 @@ struct LaboratoryView: View {
             slider("Printing light (log E)", $params.matrixLogE0, -2.5...0, step: 0.01, format: "%.2f")
             slider("Asymmetry ν", $params.matrixNu, 0.05...3, step: 0.01, format: "%.2f")
             dyeRow("Cyan D max", $params.dyeDMax[0]); dyeRow("Magenta D max", $params.dyeDMax[1]); dyeRow("Yellow D max", $params.dyeDMax[2])
+            lightRow("Cyan printer light", $params.dyeLightEV[0]); lightRow("Magenta printer light", $params.dyeLightEV[1]); lightRow("Yellow printer light", $params.dyeLightEV[2])
             gainRow("Cyan gain", $params.dyeGain[0]); gainRow("Magenta gain", $params.dyeGain[1]); gainRow("Yellow gain", $params.dyeGain[2])
         }
     }
 
     private func dyeRow(_ t: String, _ b: Binding<Double>) -> some View { slider(t, b, 1...3.5, step: 0.05, format: "%.2f") }
     private func gainRow(_ t: String, _ b: Binding<Double>) -> some View { slider(t, b, 0.5...1.5, step: 0.005, format: "%.3f") }
+    private func lightRow(_ t: String, _ b: Binding<Double>) -> some View { slider(t, b, -1.5...1.5, step: 0.01, format: "%+.2f EV") }
 
     private var keySection: some View {
         Section("Silver key image (1932–c.1944)") {
+            Picker("Print era", selection: keyEra) {
+                Text("1935 · full key").tag(KeyEra.full)
+                Text("1939–44 · light key").tag(KeyEra.light)
+                Text("post-1944 · no key").tag(KeyEra.none)
+                Text("custom").tag(KeyEra.custom)
+            }
+            .pickerStyle(.menu)
             slider("Key strength", $params.keyStrength, 0...1, step: 0.01, format: "%.2f")
             slider("Key gamma", $params.key.gamma, 0.2...2, step: 0.01, format: "%.2f")
             slider("Key printing light", $params.key.logE0, -2.5...0, step: 0.01, format: "%.2f")
@@ -259,6 +268,27 @@ struct LaboratoryView: View {
         } footer: {
             Text("Parameters marked as approximations in docs/COLOR_SCIENCE.md are starting points for comparison against reference frames, not measurements.")
         }
+    }
+
+    enum KeyEra: Hashable { case full, light, none, custom }
+
+    /// The documented "50 %" key of the first prints, the lighter key the engine ships with, or none.
+    private var keyEra: Binding<KeyEra> {
+        Binding(get: {
+            switch params.keyStrength {
+            case 1.0: return .full
+            case 0.15: return .light
+            case 0.0: return .none
+            default: return .custom
+            }
+        }, set: { era in
+            switch era {
+            case .full: params.keyStrength = 1.0
+            case .light: params.keyStrength = 0.15
+            case .none: params.keyStrength = 0.0
+            case .custom: break
+            }
+        })
     }
 
     // MARK: - Helpers
