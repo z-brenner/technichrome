@@ -103,6 +103,15 @@ namespace coreimage {
         return float4(c.r, m.g, y.b, 1.0f);
     }
 
+    /// log2 of scene luminance (sRGB-primaries weights); averaged by CIAreaAverage to get the
+    /// geometric-mean luminance used for print timing.
+    float4 tc_log_luminance(sample_t src, float exposureScale)
+    {
+        float3 e = max(src.rgb, 0.0f) * exposureScale;
+        float lum = dot(e, float3(0.2126f, 0.7152f, 0.0722f));
+        return float4(log2(max(lum, 1e-5f)), 0.0f, 0.0f, 1.0f);
+    }
+
     /// Debug/compare view: scene-linear → working space with a plain exposure (no look).
     float4 tc_linear_view(sample_t src, float exposureScale)
     {

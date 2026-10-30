@@ -46,6 +46,17 @@ public final class RAWDeveloper {
         public var scaleFactor: Float = 1.0
         public var draftMode: Bool = false
         public init() {}
+
+        /// Noise reduction that rises with ISO: RAW noise in the shadows is amplified by the print's
+        /// contrast, and a dye-transfer print is grainless. Base ISO keeps the defaults.
+        public static func adaptive(iso: Float?) -> Options {
+            var o = Options()
+            guard let iso, iso > 0 else { return o }
+            let t = min(max((log2(Double(iso) / 200.0)) / 3.0, 0.0), 1.0)   // 0 at ISO ≤ 200, 1 at ISO ≥ 1600
+            o.luminanceNoiseReduction = Float(0.25 + 0.45 * t)
+            o.colorNoiseReduction = Float(0.6 + 0.3 * t)
+            return o
+        }
     }
 
     public let filter: CIRAWFilter

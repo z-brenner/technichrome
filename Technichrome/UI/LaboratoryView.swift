@@ -93,7 +93,7 @@ struct LaboratoryView: View {
         renderTask = Task.detached(priority: .userInitiated) {
             try? await Task.sleep(for: .milliseconds(60))
             if Task.isCancelled { return }
-            let out = dev.makePrint(linear: img, baselineEV: baseline, parameters: p, extraEV: record.printExposureEV, fullLongEdge: longEdge)
+            let out = dev.makePrint(linear: img, baselineEV: baseline, parameters: p, extraEV: record.totalPrintEV, fullLongEdge: longEdge)
             let cg = dev.render(out)
             if Task.isCancelled { return }
             await MainActor.run { preview = cg; busy = false }
@@ -106,6 +106,12 @@ struct LaboratoryView: View {
         Section("Exposure") {
             slider("Print exposure", $params.exposureEV, -2...2, step: 0.05, format: "%+.2f EV")
             slider("Viewing compensation", $params.surroundExponent, 0.7...1.1, step: 0.01, format: "γ %.2f")
+            slider("Timing strength", $params.timingStrength, 0...1, step: 0.05, format: "%.2f")
+            slider("Timing target (scene key)", $params.timingTarget, 0.08...0.3, step: 0.005, format: "%.3f")
+            if let record {
+                Text(String(format: "This photograph was timed %+.2f EV at develop time; the preview uses that value.", record.printTimingEV))
+                    .font(.footnote).foregroundStyle(Theme.ivoryDim)
+            }
         }
     }
 
@@ -233,7 +239,7 @@ struct LaboratoryView: View {
         busy = true
         Task.detached(priority: .userInitiated) {
             do {
-                let result = try dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.printExposureEV)
+                let result = try dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.totalPrintEV)
                 await MainActor.run {
                     var r = record
                     r.parameters = p; r.isDeveloped = true; r.baselineExposure = result.baselineExposure

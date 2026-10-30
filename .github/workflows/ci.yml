@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Colour-science core (swift test, Linux)
+    runs-on: ubuntu-24.04
+    container: swift:6.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        run: swift test 2>&1 | tail -40
+
+  prototype:
+    name: Python prototype checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install --quiet numpy scipy pillow
+      - name: Check prototype against committed fixture and invariants
+        working-directory: tools/colorscience
+        run: python3 check_prototype.py
+
+  ios-build:
+    # macOS minutes are billed at 10x on private repositories, so this job runs on pull requests
+    # and manual dispatch only, and cancels superseded runs (see `concurrency`).
+    name: iOS app build (xcodebuild, no signing)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Metal toolchain (needed on Xcode 26+, harmless otherwise)
+        run: xcodebuild -downloadComponent MetalToolchain || true
+      - name: Build for iOS device SDK
+        run: |
+          set -o pipefail
+          xcodebuild -project Technichrome.xcodeproj -target Technichrome -sdk iphoneos -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" ONLY_ACTIVE_ARCH=NO \
+            build 2>&1 | tee build.log | grep -E "error:|warning: (unre|Main actor)|\*\* BUILD|Compiling|Metal" || true
+          echo "---- result ----"
+          if grep -q "\*\* BUILD SUCCEEDED \*\*" build.log; then echo "BUILD SUCCEEDED"; else echo "BUILD FAILED"; grep -E "error:" build.log | head -80; exit 1; fi
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build.log

@@ -41,7 +41,7 @@ public final class DevelopService: @unchecked Sendable {
     public func linearSource(for record: PhotoRecord, store: PhotoStore, scaleFactor: Float = 1.0, draft: Bool = false) throws -> (CIImage, Double) {
         let url = store.originalURL(for: record)
         if record.hasRAW {
-            var opts = RAWDeveloper.Options()
+            var opts = RAWDeveloper.Options.adaptive(iso: record.iso)
             opts.scaleFactor = scaleFactor
             opts.draftMode = draft
             let dev = try RAWDeveloper(url: url, options: opts)
@@ -60,6 +60,22 @@ public final class DevelopService: @unchecked Sendable {
                           fullLongEdge: Double, dyeMask: DyeMask = .all, spatial: Bool = true) -> CIImage {
         let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: baselineEV, extraEV: extraEV)
         return engine.makeImage(from: linear, parameters: parameters, exposureScale: scale, longEdge: fullLongEdge, dyeMask: dyeMask, spatial: spatial)
+    }
+
+    /// Print timing: measures the scene's geometric-mean luminance (after the DNG baseline exposure and the
+    /// engine's fixed exposure, before any per-print choice) and returns the correction in stops.
+    public func measureTiming(linear: CIImage, baselineEV: Double, parameters p: EngineParameters) -> Double {
+        guard p.timingStrength > 0 else { return 0 }
+        let scale = TechnichromeEngine.exposureScale(parameters: p, baselineEV: baselineEV)
+        let logLum = engine.makeLogLuminance(from: linear, exposureScale: scale)
+        let average = CIFilter.areaAverage()
+        average.inputImage = logLum
+        average.extent = linear.extent
+        guard let out = average.outputImage else { return 0 }
+        var pixel = [Float](repeating: 0, count: 4)
+        context.render(out, toBitmap: &pixel, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        let geometricMean = pow(2.0, Double(pixel[0]))
+        return PrintTiming.exposureEV(geometricMeanLuminance: geometricMean, target: p.timingTarget, strength: p.timingStrength, limit: p.timingLimit)
     }
 
     public func render(_ image: CIImage) -> CGImage? {

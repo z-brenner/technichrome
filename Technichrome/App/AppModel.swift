@@ -29,6 +29,12 @@ final class AppModel {
     var selectedPhoto: PhotoRecord?
     var showsLaboratory = false
     var showsSettings = false
+    var settings = AppSettings.load() {
+        didSet {
+            settings.save()
+            camera.captureCompanionHEIF = settings.captureCompanionHEIF
+        }
+    }
 
     private static let parametersKey = "technichrome.parameters.v1"
 
@@ -47,6 +53,7 @@ final class AppModel {
         } else {
             parameters = .default
         }
+        camera.captureCompanionHEIF = settings.captureCompanionHEIF
     }
 
     func saveParametersAsDefault(_ p: EngineParameters) {
@@ -57,5 +64,23 @@ final class AppModel {
     func resetParameters() {
         parameters = .default
         UserDefaults.standard.removeObject(forKey: Self.parametersKey)
+    }
+}
+
+struct AppSettings: Codable, Equatable {
+    var captureCompanionHEIF = true
+    var saveRAWWithPrint = true
+
+    private static let key = "technichrome.settings.v1"
+
+    static func load() -> AppSettings {
+        if let data = UserDefaults.standard.data(forKey: key), let s = try? JSONDecoder().decode(AppSettings.self, from: data) {
+            return s
+        }
+        return AppSettings()
+    }
+
+    func save() {
+        if let data = try? JSONEncoder().encode(self) { UserDefaults.standard.set(data, forKey: key) }
     }
 }

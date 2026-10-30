@@ -73,8 +73,14 @@ written with `CIContext.writeJPEGRepresentation` in Display P3.
 
 The RAW's absolute brightness depends on the camera's auto-exposure, the DNG `BaselineExposure` (iPhone
 Bayer DNGs we inspected carry none; ProRAW files carry a value around −0.3 EV) and the user's exposure bias.
-The engine applies `2^(parameters.exposureEV + baselineExposure + printExposureEV)`. The right default
-offset for iPhone Bayer files has to be calibrated on hardware (see "Untested" in README.md).
+The engine applies `2^(parameters.exposureEV + baselineExposure + printExposureEV + printTimingEV)`, where
+`printTimingEV` is measured per photograph by the print-timing step (geometric-mean luminance moved
+toward a target key, partially and clamped; see `docs/COLOR_SCIENCE.md`). That step absorbs most of the
+systematic difference between the camera's RAW placement and the LibRaw path used for tuning; the
+remaining constant offset, if any, has to be calibrated on hardware (see "Untested" in README.md).
+
+Noise reduction in the decoder rises with ISO (`RAWDeveloper.Options.adaptive(iso:)`): the print's
+contrast amplifies shadow noise, and dye-transfer prints are grainless.
 
 ## A custom demosaic?
 

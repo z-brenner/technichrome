@@ -89,7 +89,7 @@ struct PhotoDetailView: View {
                 row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), record.exposureBias))
             }
             row("Baseline", String(format: "%+.2f EV (DNG)", record.baselineExposure))
-            row("Print", "\(record.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", record.printExposureEV)) EV")
+            row("Print", "\(record.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", record.printExposureEV)) EV · timed \(String(format: "%+.2f", record.printTimingEV)) EV")
         }
         .padding(14)
         .background(Theme.panel)
@@ -110,7 +110,12 @@ struct PhotoDetailView: View {
         HStack(spacing: 10) {
             PillButton(title: "Save", prominent: true) {
                 Task {
-                    do { try await ExportService.saveToPhotos(record: record, store: model.store, includeRAW: true); message = "Saved to Photos (print + DNG)."; Haptics.success() }
+                    do {
+                        let withRAW = model.settings.saveRAWWithPrint && record.hasRAW
+                        try await ExportService.saveToPhotos(record: record, store: model.store, includeRAW: withRAW)
+                        message = withRAW ? "Saved to Photos (print + DNG)." : "Saved to Photos."
+                        Haptics.success()
+                    }
                     catch { message = error.localizedDescription }
                 }
             }

@@ -215,6 +215,10 @@ class EngineParams:
     # viewing
     projector_cct: float = 5400.0              # carbon arc ~ daylight-ish; adapted away, only 2nd-order effects remain
     surround_exponent: float = 0.92            # dark-surround print viewed on a bright-surround phone
+    # print timing: nudge the printer light so the scene's geometric-mean luminance approaches the target
+    timing_strength: float = 0.6
+    timing_target: float = 0.16
+    timing_limit: float = 1.25
     display: str = 'p3'                        # 'p3' or 'srgb'
     # spatial (not part of the per-pixel maths; documented here so the preset is complete)
     diffusion_sigma_px_at_4k: float = 1.1      # dye bleed in the gelatin, σ in px for a 4000 px long edge
@@ -332,6 +336,20 @@ class Engine:
         rgb = rgb * (10.0 ** (-key))[..., None]
         rgb = np.power(np.clip(rgb, 0.0, 1.0), self.p.surround_exponent)
         return rgb
+
+
+def timing_exposure_ev(geometric_mean, target, strength, limit):
+    """Print timing: exposure correction (stops) moving the geometric-mean luminance toward `target`,
+    scaled by `strength` and clamped to ±`limit`. Mirrors PrintTiming.swift."""
+    if geometric_mean <= 0 or target <= 0 or strength <= 0:
+        return 0.0
+    full = np.log2(target / geometric_mean)
+    return float(np.clip(full * min(max(strength, 0.0), 1.0), -limit, limit))
+
+
+def geometric_mean_luminance(rgb_linear):
+    y = S.luminance_srgb(np.asarray(rgb_linear, dtype=np.float64))
+    return float(2.0 ** np.mean(np.log2(np.maximum(y, 1e-6))))
 
 
 def soft_clip_gamut(rgb):

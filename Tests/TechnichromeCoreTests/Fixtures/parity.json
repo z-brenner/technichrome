@@ -111,6 +111,9 @@
    ]
   },
   "surroundExponent": 0.92,
+  "timingStrength": 0.6,
+  "timingTarget": 0.16,
+  "timingLimit": 1.25,
   "diffusionSigmaAt4K": 1.1,
   "misregistrationAt4K": 0.0,
   "bloomAmount": 0.0,
