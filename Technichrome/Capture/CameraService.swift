@@ -178,6 +178,7 @@ public final class CameraService {
     public func switchLens(_ lens: Lens) {
         guard lens != currentLens else { return }
         currentLens = lens
+        isExposureFocusLocked = false     // the new camera starts in continuous focus and exposure
         Task {
             do {
                 let config = try await core.reconfigure(lens: lens)
@@ -189,6 +190,7 @@ public final class CameraService {
     }
 
     private func reconfigureCurrentLens() {
+        isExposureFocusLocked = false     // configureSession restores continuous focus and exposure
         Task {
             do {
                 let config = try await core.reconfigure(lens: currentLens)
@@ -332,6 +334,7 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
             throw CameraError.noCamera
         }
         device = dev
+        locked = false                    // the device below is put into continuous focus and exposure
         // A change of subject (the user recomposed) returns a tapped focus to continuous mode, unless locked.
         if let old = subjectAreaObserver { NotificationCenter.default.removeObserver(old) }
         subjectAreaObserver = NotificationCenter.default.addObserver(forName: .AVCaptureDeviceSubjectAreaDidChange, object: dev, queue: nil) { [weak self] _ in
