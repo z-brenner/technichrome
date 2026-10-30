@@ -35,7 +35,10 @@ public enum EngineSelfTest {
         let data = floats.withUnsafeBufferPointer { Data(buffer: $0) }
         let input = CIImage(bitmapData: data, bytesPerRow: samples.count * 16, size: CGSize(width: samples.count, height: 1),
                             format: .RGBAf, colorSpace: workingSpace)
-        let output = engine.makeImage(from: input, parameters: parameters, exposureScale: 1, longEdge: Double(samples.count), spatial: false)
+        // The reference applies the parameters' exposure itself; the GPU graph takes it as a scale, so pass the
+        // same one (a nonzero exposureEV saved from the Laboratory must not read as an engine failure).
+        let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: 0)
+        let output = engine.makeImage(from: input, parameters: parameters, exposureScale: scale, longEdge: Double(samples.count), spatial: false)
         var out = [Float](repeating: 0, count: samples.count * 4)
         context.render(output, toBitmap: &out, rowBytes: samples.count * 16, bounds: CGRect(x: 0, y: 0, width: samples.count, height: 1),
                        format: .RGBAf, colorSpace: workingSpace)
