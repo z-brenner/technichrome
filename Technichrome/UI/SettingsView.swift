@@ -20,10 +20,11 @@ struct SettingsView: View {
                 Section {
                     Toggle("Capture Apple's rendering alongside the RAW", isOn: $model.settings.captureCompanionHEIF)
                     Toggle("Save the DNG with the print", isOn: $model.settings.saveRAWWithPrint)
+                    Toggle("Request full sensor resolution for RAW", isOn: $model.settings.fullResolutionRAW)
                 } header: {
                     Text("Capture and export")
                 } footer: {
-                    Text("The companion HEIF is only used for the hold-to-compare view. The DNG is always kept inside Technichrome whether or not it is saved to Photos.")
+                    Text("The companion HEIF is only used for the hold-to-compare view. The DNG is always kept inside Technichrome whether or not it is saved to Photos. Full resolution asks for the largest size the camera offers (48 MP on recent main cameras) instead of 12 MP, the size every lens offers to Bayer RAW; whether Bayer RAW is delivered at that size is one of the things to check on hardware.")
                 }
                 Section {
                     if model.camera.facts.isEmpty {

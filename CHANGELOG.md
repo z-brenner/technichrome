@@ -3,6 +3,10 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 10 — AE/AF lock, RAW resolution policy (#10)
+- Long press locks focus and exposure at a point until the next tap; a tapped focus returns to continuous mode when the subject area changes.
+- RAW requests 12 MP by default (what every lens offers to Bayer RAW); full sensor resolution is a setting.
+
 ## Round 9 — timing respects the EV dial, timed preview (#9)
 - Print timing excludes the photographer's exposure compensation, so −1 EV at capture prints a stop darker.
 - The live preview is print-timed like the develop step, measured from the frames and smoothed.

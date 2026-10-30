@@ -15,6 +15,7 @@ struct CameraView: View {
     @State private var focusPoint: CGPoint?
     @State private var focusVisible = false
     @State private var evDragStart: Float?
+    @State private var pendingLockPoint: CGPoint?
     @State private var showsLook = true
     @State private var captureError: String?
     @State private var flashOverlay = false
@@ -133,12 +134,26 @@ struct CameraView: View {
                     .position(p)
                     .transition(.opacity)
             }
+            if model.camera.isExposureFocusLocked {
+                VStack {
+                    HStack {
+                        TCLabel("ae · af locked", size: 9, color: Theme.ivory, tracking: 2.5)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(14)
+                .transition(.opacity)
+            }
             if flashOverlay {
                 Rectangle().fill(Color.black).ignoresSafeArea()
             }
         }
         .contentShape(Rectangle())
         .gesture(dragForExposure)
+        .simultaneousGesture(longPressToLock)
         .onTapGesture(count: 2) {
             model.camera.resetFocus()
             model.camera.setExposureBias(0)
@@ -162,6 +177,29 @@ struct CameraView: View {
                 }
             }
             .onEnded { _ in evDragStart = nil }
+    }
+
+    /// Long press: AE/AF lock at the point (the location comes from the drag that follows the press).
+    private var longPressToLock: some Gesture {
+        LongPressGesture(minimumDuration: 0.5, maximumDistance: 12)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                if case .second(true, let drag?) = value, pendingLockPoint == nil { pendingLockPoint = drag.location }
+            }
+            .onEnded { value in
+                var point: CGPoint?
+                if case .second(true, let drag?) = value { point = drag.location } else { point = pendingLockPoint }
+                pendingLockPoint = nil
+                if let point { lockExposureAndFocus(at: point) }
+            }
+    }
+
+    private func lockExposureAndFocus(at location: CGPoint) {
+        guard let renderer, let dp = renderer.devicePoint(forTap: location) else { return }
+        model.camera.lockExposureAndFocus(atDevicePoint: dp)
+        focusPoint = location
+        withAnimation(.easeOut(duration: 0.15)) { focusVisible = true }   // stays until the next tap
+        Haptics.success()
     }
 
     private func tapToFocus(at location: CGPoint) {

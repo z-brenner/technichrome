@@ -12,7 +12,7 @@ filter: separation negatives, gelatin matrices, three dyes, a silver key, a carb
 ## What it does
 
 1. Open Technichrome. The live preview already shows the look (an approximation, computed from the video feed).
-2. Point. Tap to focus and expose, drag vertically for exposure compensation (it reaches the print in full; print timing corrects only the camera's own placement), double-tap to reset. Choose a lens (0.5×, 1×, telephoto).
+2. Point. Tap to focus and expose, long-press to lock both, drag vertically for exposure compensation (it reaches the print in full; print timing corrects only the camera's own placement), double-tap to reset. Choose a lens (0.5×, 1×, telephoto).
    On an iPhone 16 the Camera Control button offers the same two settings (exposure in thirds of a stop, lens).
 3. Photograph, on screen or with a volume button or the Camera Control button (iOS 17.2 and later). The app captures **Bayer RAW** (DNG) on any physical back camera that offers it, Apple ProRAW where Bayer is unavailable, HEIF as a last resort. The RAW is preserved untouched.
 4. Develop. The RAW is decoded to scene-linear data with every Apple "look" stage disabled, then printed by the engine on the GPU — you watch the silver key, then yellow, cyan and magenta go down in the order Ball described in 1935.

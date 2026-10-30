@@ -15,8 +15,11 @@ own signing team on the `Technichrome` target.
 2. **Settings → Camera on this iPhone.** This section lists what AVFoundation reported for the current
    lens. Expected on an iPhone 12 or later, 1× lens: a RAW format marked *Bayer*, Video HDR *off*,
    preview colour space *sRGB*, zoom factor 1.00. Note the photo sizes line: on 48 MP sensors it says
-   whether a 48 MP size is offered to Bayer RAW or only to ProRAW/HEIF. Switch to 0.5× and the telephoto
-   and read the section again; the RAW badge in the camera's top bar says the same thing in one word.
+   which sizes the format offers; *Max photo* is what was asked for (12 MP unless *Request full sensor
+   resolution* is on in Settings). With that setting on, take a Bayer RAW and check the DNG's size in
+   the photo information: whether Bayer RAW arrives at 48 MP or the camera delivers 12 MP anyway is
+   unknown. Switch to 0.5× and the telephoto and read the section again; the RAW badge in the camera's
+   top bar says the same thing in one word.
 
 3. **Settings → Run engine self-test.** Expected: *Passed*, worst error around 0.002 (CI measures 0.0023
    on the simulator). A failure here means this phone's GPU disagrees with the CPU reference — report the
@@ -24,8 +27,11 @@ own signing team on the `Technichrome` target.
 
 4. **Preview.** Toggle *look / plain*. Tap: the reticle should land where you tapped and the camera
    should focus there (the mapping from the rotated preview to sensor coordinates is untested). Drag
-   vertically: the EV readout should move in thirds of a stop and the preview brightness follow. Double
-   tap resets. Watch for dropped frames when panning; note the phone model if the preview stutters.
+   vertically: the EV readout should move in thirds of a stop and the preview brightness follow. Long
+   press: *ae · af locked* should appear and the exposure must not change when you point at a brighter
+   area; a tap unlocks. Recompose after a tap-to-focus: the focus should return to continuous mode on
+   its own. Double tap resets. Watch for dropped frames when panning; note the phone model if the
+   preview stutters.
 
 5. **Hardware shutter.** Press a volume button: the shutter should fire on release and the flash overlay
    blink. Open the develop screen (take a picture) and press a volume button again: it should change the
