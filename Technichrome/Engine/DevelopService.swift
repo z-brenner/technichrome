@@ -85,30 +85,44 @@ public final class DevelopService: @unchecked Sendable {
         context.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: TechnichromeEngine.outputColorSpace)
     }
 
-    /// Full-resolution develop, written to disk. The graph is evaluated exactly once; the thumbnail and the
-    /// display image are derived from that render.
+    /// Full-resolution develop, written to disk. The graph is evaluated exactly once and streamed to the
+    /// JPEG in tiles, so a 48 MP print never exists in memory as a whole; the thumbnail and the display
+    /// image are then decoded from the file at reduced size by ImageIO.
     @discardableResult
     public func developToDisk(record: PhotoRecord, store: PhotoStore, parameters: EngineParameters, extraEV: Double) throws -> DevelopedImage {
         let (linear, baseline) = try linearSource(for: record, store: store)
         let longEdge = Double(max(linear.extent.width, linear.extent.height))
-        let print = makePrint(linear: linear, baselineEV: baseline, parameters: parameters, extraEV: extraEV, fullLongEdge: longEdge)
-        guard let full = render(print) else { throw DevelopError.renderFailed }
-
         let provenance = Self.printMetadata(from: store.originalURL(for: record))
-        try Self.writeJPEG(full, to: store.developedURL(for: record), quality: 0.95, metadata: provenance)
+        let print = makePrint(linear: linear, baselineEV: baseline, parameters: parameters, extraEV: extraEV, fullLongEdge: longEdge)
+            .settingProperties(provenance as [AnyHashable: Any])
 
-        let fullImage = CIImage(cgImage: full)
-        let thumbScale = min(1.0, 600.0 / longEdge)
-        guard let thumb = render(fullImage.transformed(by: CGAffineTransform(scaleX: thumbScale, y: thumbScale))) else {
+        let developedURL = store.developedURL(for: record)
+        let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
+        do {
+            try context.writeJPEGRepresentation(of: print, to: developedURL, colorSpace: TechnichromeEngine.outputColorSpace,
+                                                options: [quality: 0.95])
+        } catch {
+            throw DevelopError.writeFailed(developedURL)
+        }
+
+        guard let thumb = Self.decodeDownscaled(developedURL, maxPixelSize: 600),
+              let display = Self.decodeDownscaled(developedURL, maxPixelSize: 1500) else {
             throw DevelopError.renderFailed
         }
         try Self.writeJPEG(thumb, to: store.thumbnailURL(for: record), quality: 0.85)
-
-        let displayScale = min(1.0, 1500.0 / longEdge)
-        guard let display = render(fullImage.transformed(by: CGAffineTransform(scaleX: displayScale, y: displayScale))) else {
-            throw DevelopError.renderFailed
-        }
         return DevelopedImage(image: display, baselineExposure: baseline)
+    }
+
+    /// Decodes a JPEG at reduced size (ImageIO scales during decoding, so the full image is never unpacked).
+    static func decodeDownscaled(_ url: URL, maxPixelSize: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     /// Writes a CGImage (which carries its Display P3 colour space) as a JPEG with ImageIO, with optional
