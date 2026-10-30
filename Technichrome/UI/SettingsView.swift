@@ -26,6 +26,22 @@ struct SettingsView: View {
                     Text("The companion HEIF is only used for the hold-to-compare view. The DNG is always kept inside Technichrome whether or not it is saved to Photos.")
                 }
                 Section {
+                    if model.camera.facts.isEmpty {
+                        Text("Open the camera first. This lists what the camera system reported on this iPhone.")
+                            .font(Theme.body(13)).foregroundStyle(Theme.ivoryDim)
+                    } else {
+                        ForEach(model.camera.facts) { fact in
+                            LabeledContent(fact.label) {
+                                Text(fact.value).font(Theme.mono(11)).multilineTextAlignment(.trailing)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Camera on this iPhone")
+                } footer: {
+                    Text("For the current lens: the RAW formats on offer, the photo sizes, the preview stream's colour space and HDR state, and whether the Camera Control button is present. See docs/HARDWARE_CHECKLIST.md.")
+                }
+                Section {
                     LabeledContent("Engine", value: model.engine == nil ? "unavailable" : "Core Image + Metal kernels")
                     LabeledContent("Look", value: model.parameters.name)
                     LabeledContent("Photographs", value: "\(model.store.records.count)")

@@ -324,6 +324,8 @@ struct LaboratoryView: View {
                 Text(String(format: format, value.wrappedValue)).font(Theme.mono(12)).foregroundStyle(Theme.ivoryDim)
             }
             Slider(value: value, in: range, step: step)
+                .accessibilityLabel(title)
+                .accessibilityValue(String(format: format, value.wrappedValue))
         }
     }
 
