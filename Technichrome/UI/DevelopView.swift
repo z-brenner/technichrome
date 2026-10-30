@@ -69,6 +69,7 @@ struct DevelopView: View {
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close")
             Spacer()
             VStack(spacing: 3) {
                 Wordmark(size: 12)

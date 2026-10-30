@@ -10,6 +10,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var selfTest: EngineSelfTestResult?
+    @State private var testing = false
 
     var body: some View {
         @Bindable var model = model
@@ -27,6 +29,12 @@ struct SettingsView: View {
                     LabeledContent("Engine", value: model.engine == nil ? "unavailable" : "Core Image + Metal kernels")
                     LabeledContent("Look", value: model.parameters.name)
                     LabeledContent("Photographs", value: "\(model.store.records.count)")
+                    Button(testing ? "Testing the engine…" : "Run engine self-test") { runSelfTest() }
+                        .disabled(testing || model.engine == nil)
+                    if let selfTest {
+                        Text((selfTest.passed ? "Passed. " : "Failed. ") + selfTest.detail)
+                            .font(Theme.mono(11)).foregroundStyle(selfTest.passed ? Theme.ivory : Theme.red)
+                    }
                 } header: {
                     Text("About")
                 } footer: {
@@ -39,6 +47,17 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .tint(Theme.ivory)
+        }
+    }
+
+    /// Renders known colours through this phone's GPU and compares with the CPU reference pipeline.
+    private func runSelfTest() {
+        guard let engine = model.engine else { return }
+        let params = model.parameters
+        testing = true
+        Task.detached(priority: .userInitiated) {
+            let result = EngineSelfTest.run(engine: engine, parameters: params)
+            await MainActor.run { selfTest = result; testing = false }
         }
     }
 }

@@ -9,6 +9,7 @@
 import SwiftUI
 import CoreImage
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct LaboratoryView: View {
     @Environment(AppModel.self) private var model
@@ -22,6 +23,7 @@ struct LaboratoryView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var exportURL: URL?
+    @State private var importing = false
     @State private var referenceItem: PhotosPickerItem?
     @State private var referenceImage: UIImage?
     @State private var splitFraction: CGFloat = 0.5
@@ -56,6 +58,17 @@ struct LaboratoryView: View {
         .onAppear { params = model.parameters; loadSource() }
         .onChange(of: params) { _, _ in scheduleRender() }
         .onChange(of: referenceItem) { _, item in loadReference(item) }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+            do {
+                let url = try result.get()
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                params = try EngineParameters.fromJSON(Data(contentsOf: url))
+                message = "Loaded \"\(params.name)\"."
+            } catch {
+                message = "Could not import those parameters: \(error.localizedDescription)"
+            }
+        }
         .alert("Laboratory", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
     }
 
@@ -265,6 +278,7 @@ struct LaboratoryView: View {
             } else {
                 Button("Export parameters as JSON") { exportJSON() }
             }
+            Button("Import parameters from JSON…") { importing = true }
         } footer: {
             Text("Parameters marked as approximations in docs/COLOR_SCIENCE.md are starting points for comparison against reference frames, not measurements.")
         }
