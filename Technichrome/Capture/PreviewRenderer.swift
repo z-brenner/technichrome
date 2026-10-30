@@ -78,22 +78,28 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         guard dirty, let source = latest, let drawable = view.currentDrawable, let buffer = commandQueue.makeCommandBuffer() else { return }
         dirty = false
 
-        var image = source
+        // Aspect-fit into the drawable. The frame is scaled down *before* the engine runs: the camera can
+        // deliver frames far larger than the screen, and the per-pixel maths costs the same for every pixel.
+        let dsize = view.drawableSize
+        let srcExtent = source.extent
+        guard srcExtent.width > 0, srcExtent.height > 0, dsize.width > 0, dsize.height > 0 else { return }
+        let s = min(dsize.width / srcExtent.width, dsize.height / srcExtent.height)
+        let preScale = min(s, 1)   // never upscale before the engine
+        var image = preScale < 1
+            ? source.transformed(by: CGAffineTransform(scaleX: preScale, y: preScale), highQualityDownsample: true)
+            : source
         if showsLook, let engine {
             let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: 0, extraEV: exposureEV)
-            image = engine.makeImage(from: source, parameters: parameters, exposureScale: scale,
-                                     longEdge: Double(max(source.extent.width, source.extent.height)), spatial: false)
+            image = engine.makeImage(from: image, parameters: parameters, exposureScale: scale,
+                                     longEdge: Double(max(image.extent.width, image.extent.height)), spatial: false)
         }
-        // Aspect-fit into the drawable
-        let dsize = view.drawableSize
         let ext = image.extent
-        guard ext.width > 0, ext.height > 0, dsize.width > 0, dsize.height > 0 else { return }
-        let s = min(dsize.width / ext.width, dsize.height / ext.height)
-        let w = ext.width * s, h = ext.height * s
+        let post = s / preScale
+        let w = ext.width * post, h = ext.height * post
         let ox = (dsize.width - w) / 2, oy = (dsize.height - h) / 2
         let placed = image
-            .transformed(by: CGAffineTransform(scaleX: s, y: s))
-            .transformed(by: CGAffineTransform(translationX: ox - ext.minX * s, y: oy - ext.minY * s))
+            .transformed(by: CGAffineTransform(scaleX: post, y: post))
+            .transformed(by: CGAffineTransform(translationX: ox - ext.minX * post, y: oy - ext.minY * post))
         let pointScale = view.contentScaleFactor > 0 ? view.contentScaleFactor : 1
         imageRect = CGRect(x: ox / pointScale, y: (dsize.height - oy - h) / pointScale, width: w / pointScale, height: h / pointScale)
 

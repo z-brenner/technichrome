@@ -46,6 +46,14 @@ def main():
     ev = T.timing_exposure_ev(geometric_mean=0.09, target=0.16, strength=0.6, limit=1.25)
     assert 0.4 < ev < 0.6, ev
     assert T.timing_exposure_ev(0.001, 0.16, 1.0, 1.25) == 1.25
+    # 5. screen flare: Ball's 1:64 lifts the deepest black to about 1/64 of white and leaves white alone
+    assert eng.p.screen_flare == 0.0, "the shipped look has no screen flare"
+    pf = T.EngineParams(screen_flare=1.0 / 64.0)
+    ef = T.Engine(pf, lut_size=17)
+    b = ef.develop(np.array([[0.0, 0.0, 0.0]]))[0]
+    w = ef.develop(np.array([[4.0, 4.0, 4.0]]))[0]
+    assert b.min() > (1.0 / 65.0) ** pf.surround_exponent * 0.98, f"flare floor missing: {b}"
+    assert w.min() > 0.9, f"flare must not dim white: {w}"
     print(f"prototype OK: fixture reproduced (max err {worst:.2e}), invariants hold")
 
 

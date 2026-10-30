@@ -149,6 +149,15 @@ by carbon trim). The eye is assumed adapted to the screen white (projector throu
 so the print white is mapped to the display white with a Bradford transform. After adaptation the
 lamp's colour only produces second-order interactions with the dyes.
 
+**Screen flare — a documented figure, off by default.** Ball gives the projected contrast "from
+whitest white to blackest black" as "about 1 to 64": the print's own density, the projector's stray
+light and the theatre's flare together left the deepest black near 1/64 of the screen white. The
+engine's `screenFlare` adds that fraction of white after the key image, `(c + f) / (1 + f)`, before
+the viewing-condition exponent, and the Laboratory offers the 1:64 figure as a one-tap setting. The
+shipped look leaves it at 0: a phone is not a 1935 projection, an OLED shows the print's own density,
+and a black lifted to 1/64 of white reads as haze on a small bright screen. It is there for anyone
+matching a reference frame scanned from a projected or printed source, where it belongs.
+
 ### [8] Display — approximation
 
 The print is rendered in Display P3 (Technicolor reds exceed sRGB). Colours outside P3 are brought

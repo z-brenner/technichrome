@@ -117,6 +117,9 @@ public struct EngineParameters: Codable, Equatable, Sendable {
     /// Viewing-condition compensation: a dark-surround print viewed on a bright-surround phone.
     /// Applied as a power on display-linear values (1 = none).
     public var surroundExponent: Double
+    /// Projection flare as a fraction of screen white, added after the key: (c + f) / (1 + f). Ball (1935)
+    /// gives the projected contrast as "about 1 to 64", i.e. 1/64; the shipped look uses 0 (see the docs).
+    public var screenFlare: Double
 
     // MARK: Print timing (see PrintTiming.swift)
     /// 0 = fixed printer light; 1 = fully re-time every scene to the target key.
@@ -144,7 +147,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         exposureEV: Double, separationMatrix: [Double], negative: CurveParameters,
         dyeDMax: [Double], dyeGain: [Double], dyeLightEV: [Double] = [0, 0, 0], matrixGamma: Double, matrixLogE0: Double, matrixNu: Double,
         keyStrength: Double, key: CurveParameters, printDMin: Double, projectorCCT: Double,
-        cyan: DyeSpectrum, magenta: DyeSpectrum, yellow: DyeSpectrum, surroundExponent: Double,
+        cyan: DyeSpectrum, magenta: DyeSpectrum, yellow: DyeSpectrum, surroundExponent: Double, screenFlare: Double = 0,
         timingStrength: Double = 0.6, timingTarget: Double = 0.16, timingLimit: Double = 1.25,
         diffusionSigmaAt4K: Double, misregistrationAt4K: Double, bloomAmount: Double, bloomThreshold: Double, bloomRadiusPercent: Double,
         name: String
@@ -153,7 +156,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         self.dyeDMax = dyeDMax; self.dyeGain = dyeGain; self.dyeLightEV = dyeLightEV; self.matrixGamma = matrixGamma; self.matrixLogE0 = matrixLogE0
         self.matrixNu = matrixNu; self.keyStrength = keyStrength; self.key = key
         self.printDMin = printDMin; self.projectorCCT = projectorCCT; self.cyan = cyan; self.magenta = magenta; self.yellow = yellow
-        self.surroundExponent = surroundExponent
+        self.surroundExponent = surroundExponent; self.screenFlare = screenFlare
         self.timingStrength = timingStrength; self.timingTarget = timingTarget; self.timingLimit = timingLimit
         self.diffusionSigmaAt4K = diffusionSigmaAt4K
         self.misregistrationAt4K = misregistrationAt4K; self.bloomAmount = bloomAmount; self.bloomThreshold = bloomThreshold
@@ -180,6 +183,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
         magenta = try c.decodeIfPresent(DyeSpectrum.self, forKey: .magenta) ?? d.magenta
         yellow = try c.decodeIfPresent(DyeSpectrum.self, forKey: .yellow) ?? d.yellow
         surroundExponent = try c.decodeIfPresent(Double.self, forKey: .surroundExponent) ?? d.surroundExponent
+        screenFlare = try c.decodeIfPresent(Double.self, forKey: .screenFlare) ?? d.screenFlare
         timingStrength = try c.decodeIfPresent(Double.self, forKey: .timingStrength) ?? d.timingStrength
         timingTarget = try c.decodeIfPresent(Double.self, forKey: .timingTarget) ?? d.timingTarget
         timingLimit = try c.decodeIfPresent(Double.self, forKey: .timingLimit) ?? d.timingLimit
@@ -230,7 +234,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
                                   DyeLobe(mu: 640.0, sigmaLeft: 25.0, sigmaRight: 40.0, amplitude: 0.04, shape: 2.0)]),
         yellow: DyeSpectrum(lobes: [DyeLobe(mu: 445.0, sigmaLeft: 45.0, sigmaRight: 40.0, amplitude: 1.00, shape: 3.5),
                                   DyeLobe(mu: 505.0, sigmaLeft: 15.0, sigmaRight: 30.0, amplitude: 0.08, shape: 2.0)]),
-        surroundExponent: 0.92,
+        surroundExponent: 0.92, screenFlare: 0.0,
         timingStrength: 0.6, timingTarget: 0.16, timingLimit: 1.25,
         diffusionSigmaAt4K: 1.1,
         misregistrationAt4K: 0.0,

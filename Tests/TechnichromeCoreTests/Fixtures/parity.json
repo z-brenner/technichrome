@@ -116,6 +116,7 @@
    ]
   },
   "surroundExponent": 0.92,
+  "screenFlare": 0.0,
   "timingStrength": 0.6,
   "timingTarget": 0.16,
   "timingLimit": 1.25,

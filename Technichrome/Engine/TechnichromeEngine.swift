@@ -177,7 +177,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
         // Key, viewing compensation, back to working space
         let m = ColorSpaces.p3ToSRGB
         func mrow(_ i: Int) -> CIVector { CIVector(x: CGFloat(m[i, 0]), y: CGFloat(m[i, 1]), z: CGFloat(m[i, 2])) }
-        let out = printKernel.apply(extent: extent, arguments: [printed, keyT, Float(p.surroundExponent), mrow(0), mrow(1), mrow(2)])
+        let out = printKernel.apply(extent: extent, arguments: [printed, keyT, Float(p.surroundExponent), Float(p.screenFlare), mrow(0), mrow(1), mrow(2)])
         return out ?? printed
     }
 
