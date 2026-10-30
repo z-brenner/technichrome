@@ -34,20 +34,23 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
     /// The parameters the print was developed with (nil = app default at the time).
     public var parameters: EngineParameters?
     public var isDeveloped: Bool
+    /// File name of the original inside the photograph's folder when it is not the default (imports keep
+    /// their container type: original.jpg, original.tiff, …).
+    public var originalFile: String?
 
-    public var originalFileName: String { rawKind == .none ? "original.heic" : "original.dng" }
+    public var originalFileName: String { originalFile ?? (rawKind == .none ? "original.heic" : "original.dng") }
     public var hasRAW: Bool { rawKind != .none }
     /// Total per-print exposure offset applied on top of the engine parameters.
     public var totalPrintEV: Double { printExposureEV + printTimingEV }
 
     public init(id: UUID, capturedAt: Date, rawKind: RAWKind, lens: Lens, pixelWidth: Int, pixelHeight: Int, cameraModel: String?,
                 iso: Float?, exposureDuration: Double?, exposureBias: Float, baselineExposure: Double, printExposureEV: Double,
-                printTimingEV: Double = 0, parameters: EngineParameters?, isDeveloped: Bool) {
+                printTimingEV: Double = 0, parameters: EngineParameters?, isDeveloped: Bool, originalFile: String? = nil) {
         self.id = id; self.capturedAt = capturedAt; self.rawKind = rawKind; self.lens = lens
         self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight; self.cameraModel = cameraModel
         self.iso = iso; self.exposureDuration = exposureDuration; self.exposureBias = exposureBias
         self.baselineExposure = baselineExposure; self.printExposureEV = printExposureEV; self.printTimingEV = printTimingEV
-        self.parameters = parameters; self.isDeveloped = isDeveloped
+        self.parameters = parameters; self.isDeveloped = isDeveloped; self.originalFile = originalFile
     }
 
     public init(from decoder: Decoder) throws {
@@ -67,6 +70,7 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
         printTimingEV = try c.decodeIfPresent(Double.self, forKey: .printTimingEV) ?? 0
         parameters = try c.decodeIfPresent(EngineParameters.self, forKey: .parameters)
         isDeveloped = try c.decodeIfPresent(Bool.self, forKey: .isDeveloped) ?? false
+        originalFile = try c.decodeIfPresent(String.self, forKey: .originalFile)
     }
 }
 
@@ -120,6 +124,27 @@ public final class PhotoStore {
         try await Task.detached(priority: .userInitiated) {
             try Self.writeCaptureFiles(capture, to: dir)
         }.value
+        try save(record)
+        records.insert(record, at: 0)
+        return record
+    }
+
+    /// Adds an existing file (a DNG from Files or Photos, or any image) to the library, untouched, and
+    /// returns its undeveloped record. The file's own tags decide how it is labelled (see PhotoImporter.swift).
+    @discardableResult
+    public func add(importedData data: Data) async throws -> PhotoRecord {
+        let info = try await Task.detached(priority: .userInitiated) { try ImportedFile(data: data) }.value
+        let id = UUID()
+        let dir = folder(for: id)
+        let fileName = info.fileName
+        try await Task.detached(priority: .userInitiated) {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+        }.value
+        let record = PhotoRecord(id: id, capturedAt: info.capturedAt ?? Date(), rawKind: info.rawKind, lens: .wide,
+                                 pixelWidth: info.pixelWidth, pixelHeight: info.pixelHeight, cameraModel: info.cameraModel,
+                                 iso: info.iso, exposureDuration: info.exposureDuration, exposureBias: 0, baselineExposure: 0,
+                                 printExposureEV: 0, parameters: nil, isDeveloped: false, originalFile: fileName)
         try save(record)
         records.insert(record, at: 0)
         return record

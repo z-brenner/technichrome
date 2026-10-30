@@ -37,6 +37,22 @@ photos. They're still scene-referred"); WWDC21 session 10160.
    photo's folder as `original.dng`. The DNG is the preserved original; it can be shared from the app
    or saved to Photos next to the print.
 
+## Importing files (PhotoImporter.swift, DNGInspector.swift)
+
+The gallery imports a file from Photos or Files. The file is stored untouched and labelled from its own
+tags, read by a small TIFF/DNG parser (`DNGInspector`, unit-tested on Linux): the main image's
+`PhotometricInterpretation` is 32803 (colour filter array) for genuine sensor data — labelled **Bayer
+RAW** — or 34892 (linear, already demosaiced) — labelled **Apple ProRAW** when the maker tags say Apple,
+**Linear DNG** otherwise. A DNG of either kind goes through the same linear decoder as a capture. Any
+other image (HEIF, JPEG, TIFF) is accepted too and developed as display-referred data, like the HEIF
+fallback of a capture, and the record says so.
+
+## What the print carries
+
+The developed JPEG carries the original's camera, exposure, lens and date EXIF tags and a
+`Software = Technichrome` tag, so Photos shows the provenance of the print. Location tags are never
+copied; orientation is not copied either, because the print is rendered upright.
+
 ## Linear decode (RAWDeveloper.swift)
 
 Apple's RAW decoder (`CIRAWFilter`) is used for black-level subtraction, linearisation, lens-shading

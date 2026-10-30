@@ -1,0 +1,85 @@
+//
+//  PhotoImporter.swift
+//  Technichrome
+//
+//  Brings an existing file into the library untouched — a DNG from Files or Photos, or any image — and
+//  labels it honestly: the DNG's own tags say whether it holds sensor (Bayer) data or data that was
+//  already demosaiced (Apple ProRAW, a linear DNG export). The record is created undeveloped; the develop
+//  screen then treats it exactly like a capture.
+//
+
+import Foundation
+import ImageIO
+import UniformTypeIdentifiers
+
+public enum ImportError: Error, LocalizedError {
+    case notAnImage
+    public var errorDescription: String? { "That file is not an image Technichrome can develop." }
+}
+
+/// What is learned about an imported file before it is written to the library.
+struct ImportedFile: Sendable {
+    var fileName: String
+    var rawKind: RAWKind
+    var pixelWidth: Int
+    var pixelHeight: Int
+    var cameraModel: String?
+    var iso: Float?
+    var exposureDuration: Double?
+    var capturedAt: Date?
+
+    init(data: Data) throws {
+        if let dng = DNGInspector.inspect(data), dng.isDNG || dng.kind == .cfa || dng.kind == .linearRaw {
+            fileName = "original.dng"
+            switch dng.kind {
+            case .cfa:
+                rawKind = .bayer
+            case .linearRaw:
+                let maker = [dng.make, dng.uniqueCameraModel].compactMap { $0 }.joined(separator: " ")
+                rawKind = maker.localizedCaseInsensitiveContains("Apple") ? .proRAW : .linearDNG
+            default:
+                rawKind = .linearDNG
+            }
+            pixelWidth = dng.width ?? 0
+            pixelHeight = dng.height ?? 0
+            cameraModel = dng.uniqueCameraModel ?? dng.model
+        } else {
+            fileName = "original.heic"      // replaced below from the container's actual type
+            rawKind = .none
+            pixelWidth = 0
+            pixelHeight = 0
+            cameraModel = nil
+        }
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0 else {
+            // ImageIO cannot open it. A DNG still goes through CIRAWFilter at develop time; anything else is not an image.
+            if rawKind == .none { throw ImportError.notAnImage }
+            return
+        }
+        if rawKind == .none, let type = CGImageSourceGetType(source) as String?, let ext = UTType(type)?.preferredFilenameExtension {
+            fileName = "original.\(ext)"
+        }
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
+        if pixelWidth == 0, let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int {
+            pixelWidth = w
+            pixelHeight = h
+        }
+        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        if let ratings = exif[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber], let v = ratings.first { iso = v.floatValue }
+        if let t = exif[kCGImagePropertyExifExposureTime] as? NSNumber { exposureDuration = t.doubleValue }
+        if cameraModel == nil {
+            cameraModel = (exif[kCGImagePropertyExifLensModel] as? String) ?? (tiff[kCGImagePropertyTIFFModel] as? String)
+        }
+        if let s = exif[kCGImagePropertyExifDateTimeOriginal] as? String { capturedAt = Self.exifDate(s) }
+    }
+
+    /// EXIF "yyyy:MM:dd HH:mm:ss", read in the current time zone (EXIF carries none unless OffsetTime is present).
+    static func exifDate(_ s: String) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        f.timeZone = TimeZone.current
+        return f.date(from: s)
+    }
+}

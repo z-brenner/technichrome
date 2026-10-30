@@ -19,6 +19,9 @@ import Observation
 public enum RAWKind: String, Codable, Sendable {
     case bayer = "Bayer RAW"
     case proRAW = "Apple ProRAW"
+    /// An imported DNG whose main image is already demosaiced but is not Apple's ProRAW (a converter's or
+    /// another camera's linear DNG). Developed through the same linear decoder as ProRAW.
+    case linearDNG = "Linear DNG"
     case none = "HEIF"
 }
 
