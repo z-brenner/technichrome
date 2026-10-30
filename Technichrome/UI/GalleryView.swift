@@ -100,7 +100,9 @@ struct GalleryView: View {
         } message: {
             Text("A DNG keeps its RAW data and is labelled from its own tags (Bayer, ProRAW or linear). Any other image is developed as display-referred data.")
         }
-        .photosPicker(isPresented: $showsPhotosPicker, selection: $pickedItem, matching: .images)
+        // `.current` asks Photos for the asset's own encoding (the DNG of a ProRAW or RAW asset) rather than
+        // a rendering it might otherwise transcode on the way out.
+        .photosPicker(isPresented: $showsPhotosPicker, selection: $pickedItem, matching: .images, preferredItemEncoding: .current)
         .onChange(of: pickedItem) { _, item in
             guard let item else { return }
             pickedItem = nil

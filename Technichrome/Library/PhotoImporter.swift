@@ -71,15 +71,28 @@ struct ImportedFile: Sendable {
         if cameraModel == nil {
             cameraModel = (exif[kCGImagePropertyExifLensModel] as? String) ?? (tiff[kCGImagePropertyTIFFModel] as? String)
         }
-        if let s = exif[kCGImagePropertyExifDateTimeOriginal] as? String { capturedAt = Self.exifDate(s) }
+        if let s = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
+            capturedAt = Self.exifDate(s, offset: exif[kCGImagePropertyExifOffsetTimeOriginal] as? String)
+        }
     }
 
-    /// EXIF "yyyy:MM:dd HH:mm:ss", read in the current time zone (EXIF carries none unless OffsetTime is present).
-    static func exifDate(_ s: String) -> Date? {
+    /// EXIF "yyyy:MM:dd HH:mm:ss" with its OffsetTimeOriginal ("+02:00") when the file carries one; the
+    /// current time zone is only a fallback for files that do not.
+    static func exifDate(_ s: String, offset: String? = nil) -> Date? {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy:MM:dd HH:mm:ss"
-        f.timeZone = TimeZone.current
+        f.timeZone = offset.flatMap(Self.timeZone(fromEXIFOffset:)) ?? TimeZone.current
         return f.date(from: s)
+    }
+
+    /// "+HH:MM" / "-HH:MM" (EXIF 2.31 OffsetTime) → a fixed-offset time zone.
+    static func timeZone(fromEXIFOffset s: String) -> TimeZone? {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard t.count == 6, let sign = t.first, sign == "+" || sign == "-" else { return nil }
+        let parts = t.dropFirst().split(separator: ":")
+        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]), (0...14).contains(h), (0...59).contains(m) else { return nil }
+        let seconds = (h * 3600 + m * 60) * (sign == "-" ? -1 : 1)
+        return TimeZone(secondsFromGMT: seconds)
     }
 }
