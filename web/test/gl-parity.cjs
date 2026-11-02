@@ -1,0 +1,58 @@
+// GPU parity: the WebGL pipeline of the built site must agree with the Python fixture (and therefore the
+// Swift core and the Metal kernels) on the 32 fixture colours, within the same tolerance the app's simulator
+// tests use. Serves dist/ with the isolation headers, opens it in headless Chromium, calls the parity hook.
+const { chromium } = require('playwright');
+const http = require('node:http');
+const path = require('node:path');
+const { readFileSync, existsSync, statSync } = require('node:fs');
+
+const root = path.join(__dirname, '..', 'dist');
+const fixture = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'Tests', 'TechnichromeCoreTests', 'Fixtures', 'parity.json'), 'utf8'));
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.map': 'application/json' };
+
+if (!existsSync(path.join(root, 'index.html'))) { console.error('dist/ is missing: run `npm run build` first'); process.exit(2); }
+
+const server = http.createServer((req, res) => {
+  let file = path.join(root, decodeURIComponent(req.url.split('?')[0]));
+  if (!existsSync(file) || statSync(file).isDirectory()) file = path.join(root, 'index.html');
+  const data = readFileSync(file);
+  res.writeHead(200, {
+    'Content-Type': types[path.extname(file)] || 'application/octet-stream',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+  });
+  res.end(data);
+});
+
+(async () => {
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  // PLAYWRIGHT_CHROMIUM_PATH points at a pre-installed Chromium when the npm package's own browser is absent.
+  const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.goto(`http://127.0.0.1:${port}/`);
+  await page.waitForFunction(() => typeof window.__technichromeParity === 'function', null, { timeout: 30000 });
+  const inputs = fixture.samples.map((s) => s.input);
+  const outputs = await page.evaluate(([i, p, d]) => window.__technichromeParity(i, p, d), [inputs, fixture.parameters, fixture.lutDimension]);
+  let worst = 0, worstIndex = -1;
+  outputs.forEach((o, i) => {
+    for (let c = 0; c < 3; c++) {
+      const err = Math.abs(o[c] - fixture.samples[i].output[c]);
+      if (err > worst) { worst = err; worstIndex = i; }
+    }
+  });
+  await browser.close();
+  server.close();
+  const tolerance = 0.02;
+  console.log(`GPU vs Python fixture: worst error ${worst.toFixed(5)} on sample ${worstIndex} (tolerance ${tolerance}); isolation ok; ${errors.length} page errors`);
+  if (!(worst < tolerance)) {
+    for (let i = 0; i < Math.min(6, outputs.length); i++) {
+      console.log(`  sample ${i} input ${JSON.stringify(inputs[i])} gpu ${outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${fixture.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
+    }
+  }
+  if (errors.length) console.log(errors.join('\n'));
+  if (!(worst < tolerance) || errors.length) process.exit(1);
+})().catch((e) => { console.error(e); process.exit(1); });

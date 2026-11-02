@@ -1,0 +1,128 @@
+{
+ "exposureEV": 0.0,
+ "separationMatrix": [
+  0.8473,
+  0.1158,
+  0.0369,
+  0.031,
+  0.9297,
+  0.0393,
+  0.0398,
+  0.0864,
+  0.8738
+ ],
+ "negative": {
+  "dMin": 0.12,
+  "dMax": 2.2,
+  "gamma": 0.45,
+  "logE0": -1.0539,
+  "nu": 0.2001
+ },
+ "dyeDMax": [
+  2.8,
+  2.8,
+  2.8
+ ],
+ "dyeGain": [
+  1.1963,
+  0.9153,
+  0.8884
+ ],
+ "dyeLightEV": [
+  0.0,
+  0.0,
+  0.0
+ ],
+ "matrixGamma": 3.2176,
+ "matrixLogE0": -1.0621,
+ "matrixNu": 0.0253,
+ "keyStrength": 0.15,
+ "key": {
+  "dMin": 0.0,
+  "dMax": 1.1,
+  "gamma": 0.9,
+  "logE0": -1.05,
+  "nu": 0.5
+ },
+ "printDMin": 0.06,
+ "projectorCCT": 5400.0,
+ "cyan": {
+  "lobes": [
+   {
+    "mu": 652.0,
+    "sigmaLeft": 52.0,
+    "sigmaRight": 62.0,
+    "amplitude": 1.0,
+    "shape": 3.0
+   },
+   {
+    "mu": 540.0,
+    "sigmaLeft": 45.0,
+    "sigmaRight": 40.0,
+    "amplitude": 0.22,
+    "shape": 2.0
+   },
+   {
+    "mu": 440.0,
+    "sigmaLeft": 35.0,
+    "sigmaRight": 35.0,
+    "amplitude": 0.12,
+    "shape": 2.0
+   }
+  ]
+ },
+ "magenta": {
+  "lobes": [
+   {
+    "mu": 545.0,
+    "sigmaLeft": 42.0,
+    "sigmaRight": 42.0,
+    "amplitude": 1.0,
+    "shape": 3.5
+   },
+   {
+    "mu": 440.0,
+    "sigmaLeft": 40.0,
+    "sigmaRight": 35.0,
+    "amplitude": 0.22,
+    "shape": 2.0
+   },
+   {
+    "mu": 640.0,
+    "sigmaLeft": 25.0,
+    "sigmaRight": 40.0,
+    "amplitude": 0.04,
+    "shape": 2.0
+   }
+  ]
+ },
+ "yellow": {
+  "lobes": [
+   {
+    "mu": 445.0,
+    "sigmaLeft": 45.0,
+    "sigmaRight": 40.0,
+    "amplitude": 1.0,
+    "shape": 3.5
+   },
+   {
+    "mu": 505.0,
+    "sigmaLeft": 15.0,
+    "sigmaRight": 30.0,
+    "amplitude": 0.08,
+    "shape": 2.0
+   }
+  ]
+ },
+ "surroundExponent": 0.92,
+ "screenFlare": 0.0,
+ "timingStrength": 0.6,
+ "timingTarget": 0.16,
+ "timingLimit": 1.25,
+ "diffusionSigmaAt4K": 1.1,
+ "misregistrationAt4K": 0.0,
+ "bloomAmount": 0.0,
+ "bloomThreshold": 0.85,
+ "bloomRadiusPercent": 1.5,
+ "name": "Technichrome v1"
+}

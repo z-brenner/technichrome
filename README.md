@@ -7,6 +7,8 @@ filter: separation negatives, gelatin matrices, three dyes, a silver key, a carb
 * `docs/COLOR_SCIENCE.md` — the rendering model, what is historically documented and what is our approximation, and how to keep refining it.
 * `docs/RAW_PIPELINE.md` — Bayer RAW versus Apple ProRAW, what the decoder is allowed to do, capture policy, limits.
 * `docs/HARDWARE_CHECKLIST.md` — what to check, in order, on the first run on a real iPhone, and what to report back.
+* `docs/TESTFLIGHT.md` — getting the app onto a phone from CI, without Xcode on anyone's Mac.
+* `web/README.md` — the browser version: the same engine on your DNGs or your camera, deployed on every push.
 * `CHANGELOG.md` — what each round of work added.
 
 ## What it does
@@ -20,6 +22,16 @@ filter: separation negatives, gelatin matrices, three dyes, a silver key, a carb
 6. Import. A DNG from Photos or Files (a ProRAW, a file from another camera) is developed the same way; its own tags say whether it holds Bayer sensor data or already-demosaiced linear data, and the record says which.
 
 Everything runs on the phone. No accounts, no network, no presets — one meticulously tuned look, adjustable internally.
+
+## The web version
+
+`web/` is the same engine in a browser tab, for testing the processing before the app reaches a phone:
+open a DNG (decoded on the device with LibRaw compiled to WebAssembly, using the settings the look was
+tuned on), or use the camera (labelled *not RAW*: browsers do not expose sensor data), see the print,
+hold to compare, adjust everything in the Laboratory, save a JPEG. The per-pixel maths is a port of the
+Swift core tested against the same Python fixture (1.6e-8), and the WebGL shaders are checked against it
+in headless Chromium in CI (1.2e-4). Nothing is uploaded. See `web/README.md` for running it locally and
+for push-to-deploy on Vercel.
 
 ## Repository layout
 
