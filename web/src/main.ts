@@ -139,7 +139,12 @@ async function openFile(file: File) {
 
 // MARK: camera
 
+let cameraStarting = false;
+
 async function openCamera() {
+  if (cameraStarting) return;          // a start is already in flight
+  stopCamera();                        // never run two sessions: stop the stream and its loop first
+  cameraStarting = true;
   try {
     setBusy(true);
     camera = await startCamera(video);
@@ -177,6 +182,7 @@ async function openCamera() {
   } catch (e) {
     info.innerHTML = `<b>The camera could not be started.</b> ${(e as Error).message}`;
   } finally {
+    cameraStarting = false;
     setBusy(false);
   }
 }
