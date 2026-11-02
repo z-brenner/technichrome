@@ -37,6 +37,32 @@ jobs:
         working-directory: tools/colorscience
         run: python3 check_prototype.py
 
+  web:
+    name: Web version (engine parity, build, GPU parity in headless Chromium)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        working-directory: web
+        run: npm ci
+      - name: Engine parity with the Python fixture
+        working-directory: web
+        run: npm test
+      - name: Type-check and build
+        working-directory: web
+        run: npm run build
+      - name: Headless Chromium
+        working-directory: web
+        run: npx playwright install chromium --with-deps
+      - name: GPU parity of the built site
+        working-directory: web
+        run: npm run test:gl
+
   ios-build:
     # macOS minutes are billed at 10x on private repositories, so this job runs on pull requests
     # and manual dispatch only, and cancels superseded runs (see `concurrency`).

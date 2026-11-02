@@ -1,0 +1,125 @@
+// The web engine must agree with the Python prototype (and therefore the Swift core, which is tested against
+// the same fixture) on the 32 fixture colours: dye densities, key density and the developed output.
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { ReferencePipeline } from '../src/engine/reference';
+import { TECHNICHROME_V1, parametersFromJSON, type EngineParameters } from '../src/engine/parameters';
+import { timingExposureEV, geometricMeanLuminance } from '../src/engine/timing';
+import { dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, SRGB_TO_XYZ, P3_TO_SRGB, SRGB_TO_P3 } from '../src/engine/spectral';
+import { buildLUT, lookupLUT } from '../src/engine/printModel';
+
+interface Fixture {
+  parameters: EngineParameters;
+  lutDimension: number;
+  displaySpace: string;
+  samples: { input: number[]; dye: number[]; key: number; output: number[] }[];
+}
+
+const fixturePath = fileURLToPath(new URL('../../Tests/TechnichromeCoreTests/Fixtures/parity.json', import.meta.url));
+const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as Fixture;
+
+describe('parity with the Python prototype', () => {
+  it('ships the same parameters as the fixture', () => {
+    expect(TECHNICHROME_V1).toEqual(fixture.parameters);
+  });
+
+  it('reproduces dye densities, key density and output on every fixture sample', () => {
+    const pipe = new ReferencePipeline(fixture.parameters, fixture.lutDimension, fixture.displaySpace === 'p3' ? 'displayP3' : 'sRGB');
+    let worst = 0;
+    for (const s of fixture.samples) {
+      const { dye, key } = pipe.densities(s.input as [number, number, number]);
+      const out = pipe.develop(s.input as [number, number, number]);
+      for (let c = 0; c < 3; c++) {
+        expect(Math.abs(dye[c] - s.dye[c])).toBeLessThan(1e-7);
+        expect(Math.abs(out[c] - s.output[c])).toBeLessThan(1e-6);
+        worst = Math.max(worst, Math.abs(out[c] - s.output[c]));
+      }
+      expect(Math.abs(key - s.key)).toBeLessThan(1e-7);
+    }
+    console.log(`max |web - Python| output error: ${worst.toExponential(2)}`);
+  });
+
+  it('keeps greys neutral and monotonic, and prints a saturated red dark and red', () => {
+    const pipe = new ReferencePipeline(TECHNICHROME_V1, 17);
+    let last = Infinity;
+    for (let stop = 2; stop > -8; stop -= 0.5) {
+      const g = Math.pow(2, stop);
+      const out = pipe.develop([g, g, g]);
+      const y = (out[0] + out[1] + out[2]) / 3;
+      expect(y).toBeLessThanOrEqual(last + 1e-9);
+      if (y > 0.01) {
+        expect(Math.abs(out[0] - out[1]) / y).toBeLessThan(0.12);
+        expect(Math.abs(out[2] - out[1]) / y).toBeLessThan(0.12);
+      }
+      last = y;
+    }
+    const red = pipe.develop([0.42, 0.04, 0.045]);
+    expect(red[0]).toBeGreaterThan(red[1] * 2.5);
+    expect(red[0]).toBeGreaterThan(red[2] * 2.5);
+    expect(red[0]).toBeLessThan(0.42);
+  });
+
+  it('lifts black to the documented 1:64 floor when screen flare is on', () => {
+    const p = { ...TECHNICHROME_V1, screenFlare: 1 / 64 };
+    const pipe = new ReferencePipeline(p, 17);
+    const black = pipe.develop([0, 0, 0]);
+    const floor = Math.pow(1 / 65, p.surroundExponent);
+    expect(Math.min(...black)).toBeGreaterThan(floor * 0.98);
+    expect(Math.min(...pipe.develop([4, 4, 4]))).toBeGreaterThan(0.9);
+  });
+});
+
+describe('print timing', () => {
+  it('moves toward the target partially, clamps, and ignores the photographer\'s compensation', () => {
+    const ev = timingExposureEV(0.09, 0.16, 0.6, 1.25);
+    expect(ev).toBeCloseTo(0.6 * Math.log2(0.16 / 0.09), 12);
+    expect(timingExposureEV(0.001, 0.16, 1, 1.25)).toBe(1.25);
+    expect(timingExposureEV(2.0, 0.16, 1, 1.25)).toBe(-1.25);
+    expect(timingExposureEV(0.09, 0.16, 0, 1.25)).toBe(0);
+    expect(timingExposureEV(0.045, 0.16, 0.6, 1.25, -1)).toBeCloseTo(ev, 12);
+  });
+
+  it('computes a geometric mean of luminance', () => {
+    const buf = new Float32Array([0.04, 0.04, 0.04, 1, 1, 1]);
+    expect(geometricMeanLuminance(buf, 2, 1, 1, 1)).toBeCloseTo(0.2, 6);
+  });
+});
+
+describe('transfer functions and matrices', () => {
+  it('inverts the sRGB curve and dcraw\'s default output curve', () => {
+    expect(srgbDecode(srgbEncode(0.18))).toBeCloseTo(0.18, 9);
+    const g = dcrawGamma();
+    // dcraw's bisection lands the knee where the toe and the power segment meet: the BT.709 numbers.
+    expect(g.knee).toBeCloseTo(0.081, 3);
+    expect(g.offset).toBeCloseTo(0.099, 3);
+    expect(Math.abs(g.knee / g.ts - Math.pow((g.knee + g.offset) / (1 + g.offset), 1 / g.pwr))).toBeLessThan(1e-9);
+    expect(librawGammaDecode(1)).toBeCloseTo(1, 9);
+    for (const r of [0.001, 0.01, 0.05, 0.18, 0.5, 0.9]) expect(librawGammaDecode(librawGammaEncode(r))).toBeCloseTo(r, 9);
+  });
+
+  it('round-trips sRGB ↔ P3', () => {
+    const v = mat3.apply(P3_TO_SRGB, mat3.apply(SRGB_TO_P3, [0.2, 0.5, 0.7]));
+    expect(v[0]).toBeCloseTo(0.2, 9); expect(v[1]).toBeCloseTo(0.5, 9); expect(v[2]).toBeCloseTo(0.7, 9);
+    const white = mat3.apply(SRGB_TO_XYZ, [1, 1, 1]);
+    expect(white[1]).toBeCloseTo(1, 9);
+  });
+
+  it('builds a LUT whose corners are white and dark', () => {
+    const lut = buildLUT(TECHNICHROME_V1, 9);
+    expect(Math.min(...lookupLUT(lut, [0, 0, 0]))).toBeGreaterThan(0.93);
+    expect(Math.max(...lookupLUT(lut, [1, 1, 1]))).toBeLessThan(0.02);
+  });
+});
+
+describe('parameter JSON', () => {
+  it('decodes an older preset tolerantly', () => {
+    const p = parametersFromJSON({ exposureEV: 0.25, keyStrength: 0, cyan: { lobes: [{ mu: 650, sigmaLeft: 50, sigmaRight: 60, amplitude: 1 }] }, name: 'old' });
+    expect(p.exposureEV).toBe(0.25);
+    expect(p.keyStrength).toBe(0);
+    expect(p.cyan.lobes[0].shape).toBe(2);
+    expect(p.magenta).toEqual(TECHNICHROME_V1.magenta);
+    expect(p.screenFlare).toBe(TECHNICHROME_V1.screenFlare);
+    expect(() => parametersFromJSON({ separationMatrix: [1, 2, 3] })).toThrow();
+  });
+});

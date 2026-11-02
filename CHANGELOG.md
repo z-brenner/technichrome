@@ -3,6 +3,10 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 12 — the web version, and the app without Xcode (#12)
+- `web/`: the engine in a browser tab — a TypeScript port of the core tested against the Python fixture, WebGL2 shaders mirroring the Metal kernels (GPU parity checked in headless Chromium in CI), DNGs decoded on the device with LibRaw-wasm using the tuning settings, a camera mode labelled *not RAW*, the Laboratory, JPEG export. Deploys to Vercel on every push.
+- `.github/workflows/testflight.yml` + `docs/TESTFLIGHT.md`: the app archived, signed and uploaded to TestFlight from CI once four Apple secrets exist.
+
 ## Round 11 — full-resolution develop streamed to disk (#11)
 - The print is written in tiles straight from the Core Image graph and the thumbnail and display image are decoded from the file, so a 48 MP develop never holds the whole image in memory.
 
