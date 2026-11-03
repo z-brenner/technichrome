@@ -217,8 +217,14 @@ function makeRoomForSheet() {
   if (stage.style.paddingBottom !== padding) stage.style.paddingBottom = padding;
 }
 window.addEventListener('resize', makeRoomForSheet);
-// The sheet's height follows its content (sections open or closed, the pinned-look line), so the room follows the sheet.
-if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => makeRoomForSheet()).observe(lab);
+// The sheet's height follows its content (sections open or closed), and the stage's follows the header's and the
+// footer's (a status line coming and going, the details line): the room follows both. The stage is observed by its
+// border box, which the padding this sets does not change.
+if (typeof ResizeObserver !== 'undefined') {
+  const room = new ResizeObserver(() => makeRoomForSheet());
+  room.observe(lab);
+  room.observe(stage, { box: 'border-box' });
+}
 
 /** The stage's content box: what a picture may occupy (the padding, and on phones the open sheet, excluded). */
 function stageArea(): { width: number; height: number } {
