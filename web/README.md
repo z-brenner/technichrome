@@ -39,23 +39,31 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
   sorted by name, with ‹ › buttons and the ← → keys to step through it; the counter is in the info
   line. Decodes are kept up to about 700 MB so going back is instant; beyond that the least recently
   shown is decoded again on demand.
-* **Hold to compare** the print with the plain decode (the hold starts after a short delay, so a tap
-  does not flash).
+* **Hold to compare** the print with the plain decode: hold still on the picture (the hold starts after a
+  short delay, so a tap does not flash) or hold *Plain* in the compare control under it. The same control
+  holds *A* (once a look is pinned) and *Camera* (when the file carries the camera's JPEG); the button lights
+  while it is held and the info line says what is being shown.
+* **Facts, details, messages.** The info line keeps what changes as you work: the counter, the label, the
+  size, the print timing, the crop, what is being compared. *Details* opens a second line with the camera
+  model, ISO and shutter, baseline and print exposure, decode time and the embedded JPEG's size. One-off
+  messages (saved, copied, the look from a link, errors) have a line of their own that clears after a few
+  seconds; errors stay. The hints over the picture fade after a few seconds; `?` keeps the full list.
 * **Double-tap for 1:1.** A double-tap or double-click opens a loupe: a crop of the *full* decode
   around that point, shown pixel for pixel on the display (device pixels, so a 2× screen gets a 2× larger
   crop), printed with the dye diffusion scaled to the whole image's long edge exactly as the saved JPEG
   will be. Drag to move the crop (the image around it is uploaded with a margin, so most drags only move
   the window), hold still to compare, double-tap or Escape to leave. Without it the on-screen preview is a
   1600 px copy, which cannot show the diffusion or the key image's fine structure.
-* **The camera's own rendering.** Hold C (or the *Camera's JPEG* button) to see the JPEG the camera embedded
+* **The camera's own rendering.** Hold C (or *Camera* in the compare control) to see the JPEG the camera embedded
   in the file: for an Apple ProRAW that is Apple's full-size rendering of the same capture, for most Bayer DNGs
   a small preview, shown scaled and said so. It is decoded by the browser with its colour profile and shown as
   it is, never through the engine, so the print can be judged against what the phone would have given.
 * **Readout.** The Laboratory shows a histogram of what is on screen (the print, the plain decode, look A, the
   camera's rendering, or the loupe's crop) with the share of clipped highlights and crushed shadows, refreshed
-  after every render. The `?` key or button lists the keys and gestures.
+  after every render. The `?` key or button lists the keys and gestures. The Laboratory's sections collapse
+  (Exposure is open at first; the choice is remembered in the browser) so one slider group is in view at a time.
 * **Pin a look as A.** In the Laboratory, *Pin as A* keeps the current parameters and print exposure;
-  then hold the A key (or the *Hold for A* button) to see A against whatever the sliders say now, in
+  then hold the A key (or *A* in the compare control) to see A against whatever the sliders say now, in
   the preview or in the loupe. A saved JPEG while holding A is the pinned look (`-A` in the file name).
 * **Save JPEG** develops the full decode in 1024 px tiles, each uploaded with a halo as wide as the
   diffusion radius and printed through a window that leaves the halo out. `npm run test:gl` checks that

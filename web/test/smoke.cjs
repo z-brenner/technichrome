@@ -76,7 +76,7 @@ const server = http.createServer((req, res) => {
     console.log(`next in ${((Date.now() - t1) / 1000).toFixed(1)} s: ${await page.textContent('#info')}`);
     await page.screenshot({ path: out.replace(/\.png$/, '-2.png'), fullPage: false });
     // The camera's own rendering: hold C (when the file embeds a JPEG; a small preview says "scaled").
-    if (!(await page.isHidden('#cameraHoldButton'))) {
+    if (!(await page.isHidden('#compareCamera'))) {
       await page.keyboard.down('c');
       check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering of the second file");
       console.log(`camera's rendering (2): ${(await page.textContent('#info')).replace(/.*· (the camera.*)$/, '$1')}`);
@@ -89,7 +89,7 @@ const server = http.createServer((req, res) => {
     check((await page.textContent('#info')).includes('1 / '), 'going back shows the first again');
   }
   // The camera's own rendering of the first file, in the preview and then inside the loupe.
-  const hasCamera = !(await page.isHidden('#cameraHoldButton'));
+  const hasCamera = !(await page.isHidden('#compareCamera'));
   if (hasCamera) {
     await page.keyboard.down('c');
     check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering");
@@ -159,7 +159,7 @@ const server = http.createServer((req, res) => {
   const dims = jpegSize(jpeg);
   check(dl.suggestedFilename().startsWith('Technichrome-') && dl.suggestedFilename().endsWith('.jpg'), `the download is named Technichrome-….jpg (got ${dl.suggestedFilename()})`);
   check(dims.width === Number(size[1]) && dims.height === Number(size[2]), `the JPEG is ${size[1]}×${size[2]} (got ${dims.width}×${dims.height})`);
-  console.log(`saved ${dl.suggestedFilename()}: ${dims.width}×${dims.height}, ${(jpeg.length / 1e6).toFixed(1)} MB; ${(await page.textContent('#info')).replace(/.*· /, '')}`);
+  console.log(`saved ${dl.suggestedFilename()}: ${dims.width}×${dims.height}, ${(jpeg.length / 1e6).toFixed(1)} MB; status: ${await page.textContent('#status')}`);
   if (inputs.length > 1) {
     // Save all: one zip with a print per file and the look's JSON.
     const [zipDl] = await Promise.all([page.waitForEvent('download', { timeout: 600000 }), page.click('#saveAllButton')]);
@@ -174,6 +174,19 @@ const server = http.createServer((req, res) => {
     await page.waitForTimeout(200);
     check(!(await page.isHidden('#view')), 'the page is back after the set');
   }
+  // Details on request (with the Laboratory closed: on a phone the sheet covers the footer): the second line opens and names the camera.
+  await page.click('#detailsButton');
+  check(!(await page.isHidden('#details')) && (await page.textContent('#details')).includes('decoded in'), 'Details opens the second line');
+  await page.click('#detailsButton');
+  check(await page.isHidden('#details'), 'Less closes it again');
+  // The compare control: holding Plain shows the plain decode and lights the button.
+  const plainBox = await page.locator('#comparePlain').boundingBox();
+  await page.mouse.move(plainBox.x + plainBox.width / 2, plainBox.y + plainBox.height / 2);
+  await page.mouse.down();
+  check(await infoSays('the plain decode', true), 'holding the Plain button shows the plain decode');
+  check(await page.evaluate(() => document.getElementById('comparePlain').classList.contains('held')), 'the Plain button is lit while held');
+  await page.mouse.up();
+  check(await infoSays('the plain decode', false), 'releasing Plain returns to the print');
   // Pin the look as A, change a slider, hold A: the info line says so while held.
   await page.click('#labButton');
   if (mobile) {
@@ -182,6 +195,41 @@ const server = http.createServer((req, res) => {
     const viewBox = await page.locator('#view').boundingBox();
     const vh = page.viewportSize().height;
     check(labBox.y + labBox.height >= vh - 1 && labBox.height <= vh * 0.65 && viewBox.y + viewBox.height <= labBox.y + 1, `the Laboratory sheet sits at the bottom (top ${labBox.y.toFixed(0)} of ${vh}) with the whole picture above it (bottom ${(viewBox.y + viewBox.height).toFixed(0)})`);
+    // The sheet's height follows its sections. On a tall viewport closing Exposure shrinks the sheet, and the room
+    // kept under the picture (the stage's bottom padding: the overlap plus 12 px) must follow it at once.
+    const roomFollows = () => page.waitForFunction(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); const overlap = s.bottom - l.top, pad = parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom); return overlap > 0 && Math.abs(pad - (Math.ceil(overlap) + 12)) <= 1; }, null, { timeout: 8000, polling: 100 }).then(() => true, () => false);
+    const original = page.viewportSize();
+    await page.setViewportSize({ width: original.width, height: 1000 });
+    await page.waitForTimeout(400);
+    const tallSheet = await page.locator('#lab').boundingBox();
+    const exposureTitle = page.locator('#labBody .section', { hasText: 'Exposure' }).locator('.section-title');
+    await exposureTitle.click();
+    // The observer's callback comes with the next frame, which the software GPU can be slow to reach: poll, do not sleep.
+    const roomOf = () => page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); return { overlap: s.bottom - l.top, pad: parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom) }; });
+    const followed = await roomFollows();
+    const shrunkSheet = await page.locator('#lab').boundingBox();
+    const room = await roomOf();
+    check(shrunkSheet.y > tallSheet.y + 20, `closing Exposure shrinks the sheet on a tall viewport (top ${tallSheet.y.toFixed(0)} → ${shrunkSheet.y.toFixed(0)})`);
+    check(followed, `the room under the picture follows the sheet (overlap ${room.overlap.toFixed(0)}, padding ${room.pad.toFixed(0)})`);
+    console.log(`sheet with Exposure closed on a 1000 px viewport: top ${tallSheet.y.toFixed(0)} → ${shrunkSheet.y.toFixed(0)}, padding ${room.pad.toFixed(0)} for an overlap of ${room.overlap.toFixed(0)}`);
+    await exposureTitle.click();
+    await page.setViewportSize(original);
+    await page.waitForTimeout(400);
+    // A status line that comes and goes (Copy link, then its six seconds) changes the footer and so the stage, not the
+    // sheet: the room must follow that too.
+    await page.click('#linkButton');
+    check(!(await page.isHidden('#status')), 'Copy link shows a status line');
+    check(await roomFollows(), 'the room follows the footer growing by a status line');
+    await page.waitForFunction(() => document.getElementById('status').hidden, null, { timeout: 12000 }).then(() => true, () => false).then((ok) => check(ok, 'the status line clears itself'));
+    check(await roomFollows(), 'the room follows the footer shrinking when the status clears');
+    // The sheet covers the footer, so the compare control and the status line sit in the sheet while it is open.
+    check(await page.locator('#lab #compare').count() === 1 && !(await page.isHidden('#lab #compare')), 'the compare control sits in the open sheet');
+    check(await page.locator('#lab .look #status').count() === 1, 'the status line sits under the look actions in the open sheet');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    check(await page.locator('.foot-actions #compare').count() === 1 && await page.locator('.foot-text #status').count() === 1, 'both return to the footer when the sheet closes');
+    await page.click('#labButton');
+    await page.waitForTimeout(300);
     // The same with a wide photograph, which the sheet used to cover almost entirely (needs a second file).
     if (inputs.length > 1) {
     await page.keyboard.press('Escape');
@@ -201,7 +249,7 @@ const server = http.createServer((req, res) => {
     await page.screenshot({ path: out.replace(/\.png$/, '-lab.png'), fullPage: false });
   }
   await page.click('#pinButton');
-  check(!(await page.isHidden('#showAButton')), 'the hold-for-A button appears once pinned');
+  check(!(await page.isHidden('#compareA')), 'the A compare button appears once pinned');
   await page.locator('#labBody input[type=range]').first().fill('0.5');
   await page.keyboard.down('a');
   check(await infoSays('showing A', true), 'holding A shows the pinned look');
@@ -217,7 +265,7 @@ const server = http.createServer((req, res) => {
   await other.waitForFunction(() => document.getElementById('labBody').querySelector('input[type=range]') !== null, null, { timeout: 30000 });
   const linkedEV = await other.locator('#labBody input[type=range]').first().inputValue();
   check(linkedEV === '0.5', `the linked page restores the print exposure (got ${linkedEV})`);
-  check((await other.textContent('#info')).includes('look from the link'), 'the linked page says where its look came from');
+  check((await other.textContent('#status')).includes('look from the link'), 'the linked page says where its look came from');
   await other.close();
   console.log(`look link: ${link.length} characters, restored print exposure ${linkedEV}`);
   // A look's name is shown as text, never as markup: a crafted name through Import JSON, pinned and held as A, and
@@ -248,9 +296,9 @@ const server = http.createServer((req, res) => {
   const craftedLink = await page.evaluate(() => location.href);
   const victim = await page.context().newPage();
   await victim.goto(craftedLink);
-  await victim.waitForFunction(() => document.getElementById('info').textContent.includes('look from the link'), null, { timeout: 30000 });
+  await victim.waitForFunction(() => document.getElementById('status').textContent.includes('look from the link'), null, { timeout: 30000 });
   await victim.waitForTimeout(300);
-  const victimInfo = await victim.textContent('#info');
+  const victimInfo = await victim.textContent('#status');
   check(victimInfo.includes('<img src=x') && (await victim.evaluate(() => window.__xss)) === undefined, `a crafted look name in a link is shown as text and runs nothing (got "${victimInfo.slice(-60)}")`);
   await victim.close();
   fs.unlinkSync(crafted);
