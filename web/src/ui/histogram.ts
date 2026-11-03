@@ -31,7 +31,8 @@ export function histogramOf(rgba: Uint8Array | Uint8ClampedArray, width: number,
   return { bins, clippedHigh: count ? high / count : 0, crushedLow: count ? low / count : 0, count };
 }
 
-/** Draws the three channels as translucent log-scaled areas, red, green and blue, on a dark canvas. */
+/** Draws the three channels, red, green and blue, as faint areas with a drawn edge (square-root scale, so the
+ *  shape stays readable where the channels overlap, which is most of a photograph). */
 export function drawHistogram(canvas: HTMLCanvasElement, h: Histogram) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -39,19 +40,23 @@ export function drawHistogram(canvas: HTMLCanvasElement, h: Histogram) {
   ctx.clearRect(0, 0, w, ht);
   let peak = 1;
   for (const b of h.bins) for (let i = 1; i < 255; i++) peak = Math.max(peak, b[i]);   // the end bins (clipping) do not set the scale
-  const scale = (v: number) => (v > 0 ? Math.log1p(v) / Math.log1p(peak) : 0);
-  const colours = ['rgba(236, 80, 80, 0.55)', 'rgba(90, 200, 110, 0.55)', 'rgba(90, 140, 240, 0.55)'];
-  ctx.globalCompositeOperation = 'lighter';
+  const scale = (v: number) => Math.min(1, Math.sqrt(v / peak));
+  const fills = ['rgba(236, 80, 80, 0.16)', 'rgba(90, 200, 110, 0.16)', 'rgba(90, 140, 240, 0.16)'];
+  const edges = ['rgba(236, 90, 90, 0.9)', 'rgba(100, 210, 120, 0.9)', 'rgba(110, 150, 245, 0.9)'];
   h.bins.forEach((bins, c) => {
-    ctx.fillStyle = colours[c];
     ctx.beginPath();
     ctx.moveTo(0, ht);
-    for (let i = 0; i < 256; i++) ctx.lineTo((i / 255) * w, ht - Math.min(1, scale(bins[i])) * (ht - 2));
+    for (let i = 0; i < 256; i++) ctx.lineTo((i / 255) * w, ht - scale(bins[i]) * (ht - 3));
     ctx.lineTo(w, ht);
     ctx.closePath();
+    ctx.fillStyle = fills[c];
     ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i < 256; i++) { const x = (i / 255) * w, y = ht - scale(bins[i]) * (ht - 3); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+    ctx.strokeStyle = edges[c];
+    ctx.lineWidth = 1;
+    ctx.stroke();
   });
-  ctx.globalCompositeOperation = 'source-over';
 }
 
 export function describeClipping(h: Histogram): string {

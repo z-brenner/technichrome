@@ -87,8 +87,9 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 /* Phones: a compact header, the Laboratory as a sheet over the lower part of the screen, the picture kept visible. */
 @media (max-width: 760px) {
-  .bar { padding: 10px 16px; gap: 10px; }
+  .bar { padding: 10px 16px; gap: 10px; position: relative; }
   .sub { display: none; }
+  #helpButton { position: absolute; top: 8px; right: 16px; padding: 6px 10px; }
   .wordmark { font-size: 13px; letter-spacing: 0.36em; }
   .actions { width: 100%; justify-content: space-between; gap: 6px; }
   .actions .pill { padding: 8px 10px; font-size: 9px; letter-spacing: 0.12em; }
@@ -98,7 +99,7 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   .lab-foot .pill { padding: 7px 10px; font-size: 9px; letter-spacing: 0.12em; }
   .foot { padding: 10px 16px; gap: 10px; }
   .info { font-size: 10px; line-height: 1.5; min-width: 0; width: 100%; }
-  .foot-actions { width: 100%; justify-content: space-between; }
+  .foot-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
   .hint { bottom: 14px; max-width: 92%; text-align: center; }
   .badge { top: 20px; left: 20px; }
 }
