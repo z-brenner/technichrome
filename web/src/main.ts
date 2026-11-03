@@ -13,6 +13,7 @@ import { buildLab, defaultLabState, type LabState } from './ui/lab';
 import { installParityHook } from './parity';
 import { LOUPE_MAX_EDGE, LOUPE_RESERVE, type Rect, place, planCrop, regionFor, regionServes } from './ui/loupe';
 import { uniqueName } from './ui/names';
+import { decodeLook, encodeLook } from './ui/looklink';
 import { strToU8, zipSync } from 'fflate';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -39,6 +40,7 @@ const prevButton = $<HTMLButtonElement>('prevButton');
 const nextButton = $<HTMLButtonElement>('nextButton');
 const counter = $<HTMLSpanElement>('counter');
 const pinButton = $<HTMLButtonElement>('pinButton');
+const linkButton = $<HTMLButtonElement>('linkButton');
 const showAButton = $<HTMLButtonElement>('showAButton');
 
 let engine: GLEngine;
@@ -588,6 +590,31 @@ importInput.addEventListener('change', async () => {
   }
 });
 pinButton.addEventListener('click', pinLook);
+
+// A look as a link: put it in the address bar and on the clipboard; opening such a link applies it.
+linkButton.addEventListener('click', async () => {
+  const hash = encodeLook({ parameters: state.parameters, printExposureEV: state.printExposureEV });
+  history.replaceState(null, '', `#${hash}`);
+  let copied = false;
+  try { await navigator.clipboard.writeText(location.href); copied = true; } catch { /* no clipboard access: the address bar has it */ }
+  info.innerHTML = `${describe()} · <b>${copied ? 'link copied' : 'the address bar now carries this look'}</b> (${(location.href.length / 1024).toFixed(1)} KB)`;
+});
+function applyLinkedLook() {
+  if (!location.hash) return;
+  try {
+    const shared = decodeLook(location.hash);
+    if (!shared) return;
+    state.parameters = shared.parameters;
+    state.printExposureEV = shared.printExposureEV;
+    buildLab(labBody, state, () => scheduleRender());
+    remeasure();
+    scheduleRender();
+    info.innerHTML = `${describe()} · <b>look from the link: ${shared.parameters.name}</b>`;
+  } catch (e) {
+    info.innerHTML = `<b>Could not read the look in this link.</b> ${(e as Error).message}`;
+  }
+}
+window.addEventListener('hashchange', applyLinkedLook);
 showAButton.addEventListener('pointerdown', (e) => { e.preventDefault(); setShowingA(true); });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) showAButton.addEventListener(ev, () => setShowingA(false));
 
@@ -656,3 +683,4 @@ stage.addEventListener('drop', (e) => {
 labBody.addEventListener('input', remeasure);
 
 info.innerHTML = describe();
+applyLinkedLook();

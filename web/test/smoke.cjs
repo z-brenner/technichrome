@@ -155,6 +155,19 @@ const server = http.createServer((req, res) => {
   await page.keyboard.up('a');
   await page.waitForTimeout(200);
   check(!(await page.textContent('#info')).includes('showing A'), 'releasing A returns to the current look');
+  // A look as a link: Copy link puts it in the hash; a fresh page opened on that link gets the same sliders.
+  await page.click('#linkButton');
+  await page.waitForTimeout(200);
+  const link = await page.evaluate(() => location.href);
+  check(/#look=[A-Za-z0-9_-]+$/.test(link), `the address carries the look (${link.length} characters)`);
+  const other = await page.context().newPage();
+  await other.goto(link);
+  await other.waitForFunction(() => document.getElementById('labBody').querySelector('input[type=range]') !== null, null, { timeout: 30000 });
+  const linkedEV = await other.locator('#labBody input[type=range]').first().inputValue();
+  check(linkedEV === '0.5', `the linked page restores the print exposure (got ${linkedEV})`);
+  check((await other.textContent('#info')).includes('look from the link'), 'the linked page says where its look came from');
+  await other.close();
+  console.log(`look link: ${link.length} characters, restored print exposure ${linkedEV}`);
   if (failures.length) console.log('failed checks:\n  ' + failures.join('\n  '));
   if (errors.length) console.log('page errors:\n' + errors.join('\n'));
   await browser.close();
