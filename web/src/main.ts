@@ -63,7 +63,7 @@ let pinned: Look | null = null;
 let showingA = false;
 
 /** The photographs opened together, decoded on demand and kept up to a memory budget. */
-interface Entry { file: File; source?: DecodedSource; lastUsed: number }
+interface Entry { file: File; source?: DecodedSource; pending?: Promise<DecodedSource>; lastUsed: number }
 let queue: Entry[] = [];
 let queueIndex = -1;
 let openSerial = 0;
@@ -219,11 +219,14 @@ async function showEntry(index: number) {
   queueIndex = index;
   updateQueueNav();
   const entry = queue[index];
-  if (!entry.source) {
+  if (entry.source) {
+    setBusy(false);   // a decode still running for another entry no longer owns the overlay
+  } else {
     setBusy(true);
     try {
-      const decoded = await decodeFile(entry.file);
-      entry.source = decoded;
+      // One decode per entry, shared by whoever asks for it while it runs.
+      entry.pending ??= decodeFile(entry.file).finally(() => { delete entry.pending; });
+      entry.source = await entry.pending;
     } catch (e) {
       if (serial === openSerial) info.innerHTML = `<b>Could not open ${entry.file.name}.</b> ${(e as Error).message}`;
       return;
@@ -401,7 +404,9 @@ async function saveJPEG() {
   if (!source) return;
   setBusy(true);
   try {
-    const L = look();
+    // A snapshot of the look: the Laboratory stays usable while the tiles render, and every tile must print the same.
+    const live = look();
+    const L: Look = { parameters: cloneParameters(live.parameters), printExposureEV: live.printExposureEV, timingEV: live.timingEV };
     const full = source.full;
     const scale = exposureScaleFor(L.parameters, source.baselineEV, L.printExposureEV + L.timingEV);
     let image: StoredImage | LinearImage = full;
