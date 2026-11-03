@@ -201,7 +201,7 @@ const server = http.createServer((req, res) => {
     await page.setViewportSize({ width: original.width, height: 1000 });
     await page.waitForTimeout(400);
     const tallSheet = await page.locator('#lab').boundingBox();
-    const exposureTitle = page.locator('#labBody .section', { hasText: 'Exposure' }).locator('.section-title');
+    const exposureTitle = page.locator('#labBody .section-title', { hasText: /^Exposure$/ });   // a section's title, not a note that mentions exposure
     await exposureTitle.click();
     await page.waitForTimeout(400);
     const shrunkSheet = await page.locator('#lab').boundingBox();
@@ -265,7 +265,7 @@ const server = http.createServer((req, res) => {
   // Halation on (with the threshold at its lowest, so any photograph glows): the Spatial section opens, the glow is
   // built from the preview and the print changes (the canvas keeps its drawing buffer, so it can be compared); the
   // page must stay free of errors, which the end of the run checks. Then both back to the shipped look.
-  const spatial = page.locator('#labBody .section', { hasText: 'Spatial' });
+  const spatial = page.locator('#labBody .section', { has: page.locator('.section-title', { hasText: /^Spatial$/ }) });
   await spatial.locator('.section-title').click();
   const sliderTitles = await spatial.locator('.row-head').allTextContents();
   check(sliderTitles[2].includes('Halation') && sliderTitles[3].includes('threshold'), `the spatial sliders are in the app's order (got ${sliderTitles.join(' / ')})`);
