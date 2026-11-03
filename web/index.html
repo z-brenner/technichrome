@@ -22,21 +22,21 @@
       <button id="openButton" class="pill" type="button">Open a photograph</button>
       <button id="cameraButton" class="pill" type="button">Use the camera</button>
       <button id="labButton" class="pill" type="button">Laboratory</button>
-      <input id="fileInput" type="file" accept=".dng,.DNG,image/*,.tif,.tiff,.cr2,.cr3,.nef,.arw,.raf,.orf,.rw2,.pef" hidden />
+      <input id="fileInput" type="file" multiple accept=".dng,.DNG,image/*,.tif,.tiff,.cr2,.cr3,.nef,.arw,.raf,.orf,.rw2,.pef" hidden />
     </nav>
   </header>
 
   <main id="main">
     <section id="stage" class="stage">
       <div id="drop" class="drop">
-        <div class="drop-title">Drop a DNG here</div>
-        <div class="drop-body">A Bayer RAW from the app or another camera app, an Apple ProRAW, or any DNG LibRaw reads. JPEG and PNG work too, labelled as what they are: not RAW.</div>
+        <div class="drop-title">Drop DNGs here</div>
+        <div class="drop-body">One, several, or a folder: a Bayer RAW from the app or another camera app, an Apple ProRAW, or any DNG LibRaw reads. JPEG and PNG work too, labelled as what they are: not RAW.</div>
         <div class="drop-foot">Everything runs in this tab. No upload, no account.</div>
       </div>
       <canvas id="view" class="view" hidden></canvas>
       <video id="video" class="hidden" playsinline muted autoplay></video>
       <div id="badge" class="badge" hidden></div>
-      <div id="hint" class="hint" hidden>hold the image to compare with the plain decode</div>
+      <div id="hint" class="hint" hidden>hold to compare with the plain decode · double-tap for 1:1</div>
       <div id="busy" class="busy" hidden><span></span></div>
     </section>
 
@@ -51,6 +51,8 @@
         <button id="exportButton" class="pill" type="button">Export JSON</button>
         <button id="importButton" class="pill" type="button">Import JSON</button>
         <input id="importInput" type="file" accept="application/json,.json" hidden />
+        <button id="pinButton" class="pill" type="button" title="Keep the current look as A, then hold the A key (or this button) to see it again">Pin as A</button>
+        <button id="showAButton" class="pill" type="button" hidden title="Hold to show the pinned look">Hold for A</button>
       </div>
     </aside>
   </main>
@@ -58,6 +60,11 @@
   <footer class="foot">
     <div id="info" class="info">Open a photograph to begin.</div>
     <div class="foot-actions">
+      <div id="queueNav" class="nav" hidden>
+        <button id="prevButton" class="pill" type="button" aria-label="Previous photograph">‹</button>
+        <span id="counter" class="counter"></span>
+        <button id="nextButton" class="pill" type="button" aria-label="Next photograph">›</button>
+      </div>
       <button id="captureButton" class="pill prominent" type="button" hidden>Photograph</button>
       <button id="saveButton" class="pill prominent" type="button" hidden>Save JPEG</button>
       <button id="stopCameraButton" class="pill" type="button" hidden>Stop the camera</button>
