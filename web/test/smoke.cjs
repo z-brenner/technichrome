@@ -197,6 +197,7 @@ const server = http.createServer((req, res) => {
     check(labBox.y + labBox.height >= vh - 1 && labBox.height <= vh * 0.65 && viewBox.y + viewBox.height <= labBox.y + 1, `the Laboratory sheet sits at the bottom (top ${labBox.y.toFixed(0)} of ${vh}) with the whole picture above it (bottom ${(viewBox.y + viewBox.height).toFixed(0)})`);
     // The sheet's height follows its sections. On a tall viewport closing Exposure shrinks the sheet, and the room
     // kept under the picture (the stage's bottom padding: the overlap plus 12 px) must follow it at once.
+    const roomFollows = () => page.waitForFunction(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); const overlap = s.bottom - l.top, pad = parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom); return overlap > 0 && Math.abs(pad - (Math.ceil(overlap) + 12)) <= 1; }, null, { timeout: 8000, polling: 100 }).then(() => true, () => false);
     const original = page.viewportSize();
     await page.setViewportSize({ width: original.width, height: 1000 });
     await page.waitForTimeout(400);
@@ -205,7 +206,7 @@ const server = http.createServer((req, res) => {
     await exposureTitle.click();
     // The observer's callback comes with the next frame, which the software GPU can be slow to reach: poll, do not sleep.
     const roomOf = () => page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); return { overlap: s.bottom - l.top, pad: parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom) }; });
-    const followed = await page.waitForFunction(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); const overlap = s.bottom - l.top, pad = parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom); return overlap > 0 && Math.abs(pad - (Math.ceil(overlap) + 12)) <= 1; }, null, { timeout: 8000, polling: 100 }).then(() => true, () => false);
+    const followed = await roomFollows();
     const shrunkSheet = await page.locator('#lab').boundingBox();
     const room = await roomOf();
     check(shrunkSheet.y > tallSheet.y + 20, `closing Exposure shrinks the sheet on a tall viewport (top ${tallSheet.y.toFixed(0)} → ${shrunkSheet.y.toFixed(0)})`);
@@ -214,6 +215,13 @@ const server = http.createServer((req, res) => {
     await exposureTitle.click();
     await page.setViewportSize(original);
     await page.waitForTimeout(400);
+    // A status line that comes and goes (Copy link, then its six seconds) changes the footer and so the stage, not the
+    // sheet: the room must follow that too.
+    await page.click('#linkButton');
+    check(!(await page.isHidden('#status')), 'Copy link shows a status line');
+    check(await roomFollows(), 'the room follows the footer growing by a status line');
+    await page.waitForFunction(() => document.getElementById('status').hidden, null, { timeout: 12000 }).then(() => true, () => false).then((ok) => check(ok, 'the status line clears itself'));
+    check(await roomFollows(), 'the room follows the footer shrinking when the status clears');
     // The same with a wide photograph, which the sheet used to cover almost entirely (needs a second file).
     if (inputs.length > 1) {
     await page.keyboard.press('Escape');
