@@ -9,7 +9,7 @@ build and simulator GPU tests on a macOS runner) and a Codex review.
 
 ## Round 20 — breathing room (#21)
 - The page says less at once. The info line keeps the facts that change (counter, label, size, print timing, the crop, what is being compared); the camera model, exposure, decode time and the embedded JPEG's size moved to a *Details* line that opens on request; one-off messages (saved, copied, the look from a link, errors) have a line of their own that clears itself after a few seconds.
-- Plain / A / Camera are one hold-to-compare control under the picture, lit while held; the hints over the picture fade after a few seconds (`?` keeps the full list); the Laboratory's sections collapse (only Exposure open at first, the choice remembered) and its look actions are text under the look's name; the header and footer are two calm rows on a phone.
+- Plain / A / Camera are one hold-to-compare control under the picture, lit while held; the hints over the picture fade after a few seconds (`?` keeps the full list); the Laboratory's sections collapse (only Exposure open at first, the choice remembered) and its look actions are text under the look's name; the header and footer are two calm rows on a phone, and while the sheet is open there the compare control and the status line sit inside it (the room under the picture follows the sheet's and the footer's size).
 - A double-tap is timed from when the finger landed, not from when a busy main thread got to it, so two quick taps either side of a long render frame still open the loupe.
 
 ## Round 19 — the end-to-end test in CI (#20)

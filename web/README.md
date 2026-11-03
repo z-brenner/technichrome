@@ -42,7 +42,9 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
 * **Hold to compare** the print with the plain decode: hold still on the picture (the hold starts after a
   short delay, so a tap does not flash) or hold *Plain* in the compare control under it. The same control
   holds *A* (once a look is pinned) and *Camera* (when the file carries the camera's JPEG); the button lights
-  while it is held and the info line says what is being shown.
+  while it is held and the info line says what is being shown. On a phone, while the Laboratory sheet is
+  open, the control sits in the sheet's head and the status line under the look's actions, so a look can be
+  compared and the messages read without closing the sheet.
 * **Facts, details, messages.** The info line keeps what changes as you work: the counter, the label, the
   size, the print timing, the crop, what is being compared. *Details* opens a second line with the camera
   model, ISO and shutter, baseline and print exposure, decode time and the embedded JPEG's size. One-off
