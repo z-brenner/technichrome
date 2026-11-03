@@ -1,10 +1,11 @@
-/* Technichrome web: the app's laboratory aesthetic — black, ivory serif, one red. */
+/* Technichrome web: the app's laboratory aesthetic — black, ivory serif, one red — with room to breathe. */
 :root {
   --bg: #0b0a09;
   --panel: #151311;
   --ivory: #e8dfcf;
   --ivory-dim: #9d9589;
   --ivory-faint: #3a3631;
+  --ivory-hair: #26231f;
   --red: #c8232b;
   --cyan: #1aa3b5;
   --magenta: #c43a8a;
@@ -19,20 +20,24 @@ body { display: flex; flex-direction: column; min-height: 100dvh; }
 button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
 .hidden { display: none !important; }
 
-.bar { display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-bottom: 1px solid var(--ivory-faint); flex-wrap: wrap; }
+/* Header: the wordmark and four words. */
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 24px; border-bottom: 1px solid var(--ivory-hair); }
 .wordmark { font-family: var(--serif); font-weight: 600; letter-spacing: 0.42em; font-size: 15px; }
-.sub { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ivory-dim); flex: 1; min-width: 200px; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.actions { display: flex; gap: 8px; align-items: center; }
 
-.pill { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; padding: 9px 16px; border-radius: 999px; border: 1px solid var(--ivory-faint); background: rgba(255,255,255,0.05); color: var(--ivory); }
-.pill:hover { background: rgba(255,255,255,0.1); }
-.pill:disabled { opacity: 0.4; cursor: default; }
+.pill { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--ivory-faint); background: rgba(255,255,255,0.04); color: var(--ivory); white-space: nowrap; }
+.pill:hover { background: rgba(255,255,255,0.09); }
+.pill:disabled { opacity: 0.35; cursor: default; }
 .pill.prominent { background: var(--ivory); color: #000; border-color: var(--ivory); }
 .pill.prominent:hover { background: #fff; }
+.pill.small { padding: 6px 11px; font-size: 12px; letter-spacing: 0; line-height: 1; }
+.pill.round { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
 .icon { font-size: 20px; line-height: 1; color: var(--ivory-dim); padding: 4px 8px; }
+.text { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ivory-dim); padding: 4px 2px; border-bottom: 1px solid transparent; }
+.text:hover { color: var(--ivory); border-bottom-color: var(--ivory-faint); }
 
 #main { flex: 1; display: flex; min-height: 0; position: relative; }
-.stage { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; padding: 16px; min-height: 320px; background: radial-gradient(ellipse at center, #121110 0%, var(--bg) 70%); overflow: hidden; }
+.stage { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; padding: 20px; min-height: 320px; background: radial-gradient(ellipse at center, #121110 0%, var(--bg) 70%); overflow: hidden; }
 /* The preview fits the stage's own box (a flex item's percentage resolves against the stage's flexed height), whatever
    the header and footer take: never a viewport guess that a wrapping info line could exceed. */
 .view { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; box-shadow: 0 30px 80px rgba(0,0,0,0.6); touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -41,33 +46,37 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .drop.active { border-color: var(--ivory); background: rgba(255,255,255,0.03); }
 .drop-title { font-size: 26px; font-weight: 500; letter-spacing: 0.04em; margin-bottom: 14px; }
 .drop-body { font-size: 17px; line-height: 1.45; color: var(--ivory-dim); }
-.drop-foot { margin-top: 18px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ivory-dim); }
+.drop-foot { margin-top: 18px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ivory-dim); line-height: 1.8; }
 
-.badge { position: absolute; top: 24px; left: 24px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; padding: 7px 12px; border-radius: 999px; background: rgba(0,0,0,0.55); border: 1px solid var(--ivory-faint); color: var(--ivory); }
-.badge.warn { border-color: var(--red); color: var(--ivory); }
-.hint { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ivory-dim); pointer-events: none; }
+.badge { position: absolute; top: 28px; left: 28px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; padding: 6px 11px; border-radius: 999px; background: rgba(11,10,9,0.6); border: 1px solid var(--ivory-faint); color: var(--ivory); }
+.badge.warn { border-color: var(--red); }
+/* The hint shows for a few seconds after something changes, then fades; the help card keeps the full list. */
+.hint { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); max-width: 90%; text-align: center; font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ivory-dim); pointer-events: none; opacity: 1; transition: opacity 0.8s ease; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+.hint.faded { opacity: 0; }
 .busy { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 18px; align-items: center; justify-content: center; background: rgba(11,10,9,0.55); }
-.busy-text { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ivory); text-align: center; padding: 0 24px; }
 .busy span { width: 78px; height: 78px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--cyan); border-right-color: var(--magenta); border-bottom-color: var(--yellow); animation: spin 1.6s linear infinite; }
+.busy-text { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ivory); text-align: center; padding: 0 24px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.lab { width: min(380px, 100%); border-left: 1px solid var(--ivory-faint); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
-.lab-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--ivory-faint); }
+/* The Laboratory. */
+.lab { width: min(380px, 100%); border-left: 1px solid var(--ivory-hair); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.lab-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--ivory-hair); }
 .lab-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.32em; }
-.readout { padding: 12px 18px 0; }
-.readout canvas { display: block; width: 100%; height: 72px; background: var(--bg); border: 1px solid var(--ivory-faint); border-radius: 4px; }
-.readout-text { font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ivory-dim); margin-top: 6px; }
-.lab-body { flex: 1; overflow: auto; padding: 8px 18px 18px; }
-.help { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(11,10,9,0.86); }
-.help-card { max-width: 460px; width: 100%; max-height: calc(100dvh - 40px); overflow: auto; padding: 26px 30px; border: 1px solid var(--ivory-faint); background: var(--panel); }
-.help-card dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 18px 0; font-size: 15px; }
-.help-card dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ivory); padding-top: 3px; }
-.help-card dd { margin: 0; color: var(--ivory-dim); }
-.help-foot { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ivory-dim); margin-bottom: 16px; line-height: 1.6; }
-.lab-foot { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--ivory-faint); }
-.section { margin-top: 18px; }
-.section-title { font-family: var(--mono); font-size: 9px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--ivory-dim); margin-bottom: 8px; }
-.row { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.readout { padding: 14px 20px 0; }
+.readout canvas { display: block; width: 100%; height: 64px; background: var(--bg); border: 1px solid var(--ivory-hair); border-radius: 4px; }
+.readout-text { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ivory-dim); margin-top: 6px; }
+.look { padding: 16px 20px 12px; border-bottom: 1px solid var(--ivory-hair); }
+.look-name { font-size: 19px; font-weight: 500; letter-spacing: 0.02em; margin-bottom: 6px; }
+.look-actions { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.lab-body { flex: 1; overflow: auto; padding: 4px 20px 24px; }
+.section { border-bottom: 1px solid var(--ivory-hair); }
+.section-title { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 14px 0; font-family: var(--mono); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ivory-dim); text-align: left; }
+.section-title:hover { color: var(--ivory); }
+.section-title::after { content: "+"; font-size: 13px; color: var(--ivory-faint); }
+.section.open .section-title::after { content: "−"; }
+.section-body { display: none; padding-bottom: 10px; }
+.section.open .section-body { display: block; }
+.row { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 12px; }
 .row-head { display: flex; justify-content: space-between; font-size: 15px; }
 .row-head .value { font-family: var(--mono); font-size: 11px; color: var(--ivory-dim); }
 .row input[type=range] { width: 100%; accent-color: var(--ivory); }
@@ -77,29 +86,48 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .seg button { font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; border: 1px solid var(--ivory-faint); border-radius: 999px; padding: 5px 10px; color: var(--ivory-dim); }
 .seg button.on { background: var(--ivory); color: #000; border-color: var(--ivory); }
 
-.foot { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-top: 1px solid var(--ivory-faint); flex-wrap: wrap; }
-.info { flex: 1; min-width: 240px; font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--ivory-dim); }
+/* Help. */
+.help { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(11,10,9,0.86); }
+.help-card { max-width: 460px; width: 100%; max-height: calc(100dvh - 40px); overflow: auto; padding: 26px 30px; border: 1px solid var(--ivory-faint); background: var(--panel); }
+.help-card dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 18px 0; font-size: 15px; }
+.help-card dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ivory); padding-top: 3px; }
+.help-card dd { margin: 0; color: var(--ivory-dim); }
+.help-foot { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ivory-dim); margin-bottom: 16px; line-height: 1.7; }
+
+/* Footer: one line of facts, a second only when asked for, and the actions. */
+.foot { display: flex; align-items: center; gap: 20px; padding: 14px 24px; border-top: 1px solid var(--ivory-hair); flex-wrap: wrap; }
+.foot-text { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 3px; }
+.info { font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--ivory-dim); }
 .info b { color: var(--ivory); font-weight: 500; }
-.foot-actions { display: flex; gap: 8px; align-items: center; }
-.nav { display: flex; gap: 6px; align-items: center; }
-.nav .pill { padding: 7px 12px; font-size: 13px; letter-spacing: 0; }
-.counter { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; color: var(--ivory-dim); min-width: 56px; text-align: center; }
+.details { font-family: var(--mono); font-size: 10px; line-height: 1.6; color: var(--ivory-dim); opacity: 0.8; }
+.status { font-family: var(--mono); font-size: 10px; line-height: 1.6; color: var(--ivory); }
+.status b { font-weight: 500; }
+.status.error { color: #e0786f; }
+.foot-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.nav { display: flex; gap: 4px; align-items: center; }
+.counter { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ivory-dim); min-width: 40px; text-align: center; }
+/* Hold to compare: one small control, lit while held. */
+.compare { display: inline-flex; border: 1px solid var(--ivory-faint); border-radius: 999px; overflow: hidden; }
+.compare button { font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ivory-dim); padding: 7px 12px; border-right: 1px solid var(--ivory-faint); touch-action: none; user-select: none; -webkit-user-select: none; }
+.compare button:last-child { border-right: none; }
+.compare button:hover { color: var(--ivory); }
+.compare button.held { background: var(--ivory); color: #000; }
 
 /* Phones: a compact header, the Laboratory as a sheet over the lower part of the screen, the picture kept visible. */
 @media (max-width: 760px) {
-  .bar { padding: 10px 16px; gap: 10px; position: relative; }
-  .sub { display: none; }
-  #helpButton { position: absolute; top: 8px; right: 16px; padding: 6px 10px; }
+  .bar { flex-wrap: wrap; padding: 12px 16px 10px; gap: 10px; }
   .wordmark { font-size: 13px; letter-spacing: 0.36em; }
-  .actions { width: 100%; justify-content: space-between; gap: 6px; }
-  .actions .pill { padding: 8px 10px; font-size: 9px; letter-spacing: 0.12em; }
+  .actions { width: 100%; gap: 6px; }
+  .actions .pill { padding: 7px 10px; font-size: 9px; letter-spacing: 0.1em; }
+  .actions .pill.round { width: 26px; height: 26px; margin-left: auto; }
   #main { flex-direction: column; }
   .stage { padding: 12px; min-height: 0; }
   .lab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; width: 100%; max-height: 62dvh; border-left: none; border-top: 1px solid var(--ivory-faint); box-shadow: 0 -24px 60px rgba(0,0,0,0.6); }
-  .lab-foot .pill { padding: 7px 10px; font-size: 9px; letter-spacing: 0.12em; }
-  .foot { padding: 10px 16px; gap: 10px; }
-  .info { font-size: 10px; line-height: 1.5; min-width: 0; width: 100%; }
-  .foot-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
-  .hint { bottom: 14px; max-width: 92%; text-align: center; }
+  .readout canvas { height: 48px; }
+  .foot { padding: 10px 16px 12px; gap: 8px; }
+  .foot-text { min-width: 0; width: 100%; }
+  .info { font-size: 10px; line-height: 1.5; }
+  .foot-actions { width: 100%; justify-content: space-between; gap: 8px; }
   .badge { top: 20px; left: 20px; }
+  .hint { bottom: 14px; }
 }

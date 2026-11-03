@@ -76,7 +76,7 @@ const server = http.createServer((req, res) => {
     console.log(`next in ${((Date.now() - t1) / 1000).toFixed(1)} s: ${await page.textContent('#info')}`);
     await page.screenshot({ path: out.replace(/\.png$/, '-2.png'), fullPage: false });
     // The camera's own rendering: hold C (when the file embeds a JPEG; a small preview says "scaled").
-    if (!(await page.isHidden('#cameraHoldButton'))) {
+    if (!(await page.isHidden('#compareCamera'))) {
       await page.keyboard.down('c');
       check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering of the second file");
       console.log(`camera's rendering (2): ${(await page.textContent('#info')).replace(/.*· (the camera.*)$/, '$1')}`);
@@ -89,7 +89,7 @@ const server = http.createServer((req, res) => {
     check((await page.textContent('#info')).includes('1 / '), 'going back shows the first again');
   }
   // The camera's own rendering of the first file, in the preview and then inside the loupe.
-  const hasCamera = !(await page.isHidden('#cameraHoldButton'));
+  const hasCamera = !(await page.isHidden('#compareCamera'));
   if (hasCamera) {
     await page.keyboard.down('c');
     check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering");
@@ -159,7 +159,7 @@ const server = http.createServer((req, res) => {
   const dims = jpegSize(jpeg);
   check(dl.suggestedFilename().startsWith('Technichrome-') && dl.suggestedFilename().endsWith('.jpg'), `the download is named Technichrome-….jpg (got ${dl.suggestedFilename()})`);
   check(dims.width === Number(size[1]) && dims.height === Number(size[2]), `the JPEG is ${size[1]}×${size[2]} (got ${dims.width}×${dims.height})`);
-  console.log(`saved ${dl.suggestedFilename()}: ${dims.width}×${dims.height}, ${(jpeg.length / 1e6).toFixed(1)} MB; ${(await page.textContent('#info')).replace(/.*· /, '')}`);
+  console.log(`saved ${dl.suggestedFilename()}: ${dims.width}×${dims.height}, ${(jpeg.length / 1e6).toFixed(1)} MB; status: ${await page.textContent('#status')}`);
   if (inputs.length > 1) {
     // Save all: one zip with a print per file and the look's JSON.
     const [zipDl] = await Promise.all([page.waitForEvent('download', { timeout: 600000 }), page.click('#saveAllButton')]);
@@ -174,6 +174,19 @@ const server = http.createServer((req, res) => {
     await page.waitForTimeout(200);
     check(!(await page.isHidden('#view')), 'the page is back after the set');
   }
+  // Details on request (with the Laboratory closed: on a phone the sheet covers the footer): the second line opens and names the camera.
+  await page.click('#detailsButton');
+  check(!(await page.isHidden('#details')) && (await page.textContent('#details')).includes('decoded in'), 'Details opens the second line');
+  await page.click('#detailsButton');
+  check(await page.isHidden('#details'), 'Less closes it again');
+  // The compare control: holding Plain shows the plain decode and lights the button.
+  const plainBox = await page.locator('#comparePlain').boundingBox();
+  await page.mouse.move(plainBox.x + plainBox.width / 2, plainBox.y + plainBox.height / 2);
+  await page.mouse.down();
+  check(await infoSays('the plain decode', true), 'holding the Plain button shows the plain decode');
+  check(await page.evaluate(() => document.getElementById('comparePlain').classList.contains('held')), 'the Plain button is lit while held');
+  await page.mouse.up();
+  check(await infoSays('the plain decode', false), 'releasing Plain returns to the print');
   // Pin the look as A, change a slider, hold A: the info line says so while held.
   await page.click('#labButton');
   if (mobile) {
@@ -201,7 +214,7 @@ const server = http.createServer((req, res) => {
     await page.screenshot({ path: out.replace(/\.png$/, '-lab.png'), fullPage: false });
   }
   await page.click('#pinButton');
-  check(!(await page.isHidden('#showAButton')), 'the hold-for-A button appears once pinned');
+  check(!(await page.isHidden('#compareA')), 'the A compare button appears once pinned');
   await page.locator('#labBody input[type=range]').first().fill('0.5');
   await page.keyboard.down('a');
   check(await infoSays('showing A', true), 'holding A shows the pinned look');
@@ -217,7 +230,7 @@ const server = http.createServer((req, res) => {
   await other.waitForFunction(() => document.getElementById('labBody').querySelector('input[type=range]') !== null, null, { timeout: 30000 });
   const linkedEV = await other.locator('#labBody input[type=range]').first().inputValue();
   check(linkedEV === '0.5', `the linked page restores the print exposure (got ${linkedEV})`);
-  check((await other.textContent('#info')).includes('look from the link'), 'the linked page says where its look came from');
+  check((await other.textContent('#status')).includes('look from the link'), 'the linked page says where its look came from');
   await other.close();
   console.log(`look link: ${link.length} characters, restored print exposure ${linkedEV}`);
   // A look's name is shown as text, never as markup: a crafted name through Import JSON, pinned and held as A, and
@@ -248,9 +261,9 @@ const server = http.createServer((req, res) => {
   const craftedLink = await page.evaluate(() => location.href);
   const victim = await page.context().newPage();
   await victim.goto(craftedLink);
-  await victim.waitForFunction(() => document.getElementById('info').textContent.includes('look from the link'), null, { timeout: 30000 });
+  await victim.waitForFunction(() => document.getElementById('status').textContent.includes('look from the link'), null, { timeout: 30000 });
   await victim.waitForTimeout(300);
-  const victimInfo = await victim.textContent('#info');
+  const victimInfo = await victim.textContent('#status');
   check(victimInfo.includes('<img src=x') && (await victim.evaluate(() => window.__xss)) === undefined, `a crafted look name in a link is shown as text and runs nothing (got "${victimInfo.slice(-60)}")`);
   await victim.close();
   fs.unlinkSync(crafted);

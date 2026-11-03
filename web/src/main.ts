@@ -42,12 +42,18 @@ const prevButton = $<HTMLButtonElement>('prevButton');
 const nextButton = $<HTMLButtonElement>('nextButton');
 const counter = $<HTMLSpanElement>('counter');
 const pinButton = $<HTMLButtonElement>('pinButton');
-const cameraHoldButton = $<HTMLButtonElement>('cameraHoldButton');
 const histogramCanvas = $<HTMLCanvasElement>('histogram');
 const readoutText = $<HTMLDivElement>('readoutText');
 const help = $<HTMLDivElement>('help');
 const linkButton = $<HTMLButtonElement>('linkButton');
-const showAButton = $<HTMLButtonElement>('showAButton');
+const status = $<HTMLDivElement>('status');
+const details = $<HTMLDivElement>('details');
+const detailsButton = $<HTMLButtonElement>('detailsButton');
+const compare = $<HTMLDivElement>('compare');
+const comparePlain = $<HTMLButtonElement>('comparePlain');
+const compareA = $<HTMLButtonElement>('compareA');
+const compareCamera = $<HTMLButtonElement>('compareCamera');
+const lookName = $<HTMLDivElement>('lookName');
 
 let engine: GLEngine;
 try {
@@ -57,7 +63,7 @@ try {
   throw e;
 }
 const output = engine.supportsP3Canvas ? 'displayP3' : 'sRGB';
-$<HTMLDivElement>('engineLabel').textContent = `web · the same engine as the iPhone app · ${engine.supportsP3Canvas ? 'display p3' : 'srgb'} · nothing leaves this device`;
+for (const id of ['renderingNote', 'helpNote']) $<HTMLSpanElement>(id).textContent = `The same engine as the iPhone app, rendering in ${engine.supportsP3Canvas ? 'Display P3' : 'sRGB'}.`;
 
 const state: LabState = defaultLabState();
 let source: DecodedSource | null = null;
@@ -119,22 +125,16 @@ function look(): Look {
 function fmtEV(v: number): string { return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)} EV`; }
 
 function describe(): string {
-  if (camera && !source) return `<b>Camera</b> · ${camera.width}×${camera.height} · not RAW: the browser's own processed stream, linearised from sRGB · timed ${fmtEV(cameraTimingEV)}`;
+  if (camera && !source) return `<b>Camera</b> · ${camera.width}×${camera.height} · not RAW · timed ${fmtEV(cameraTimingEV)}`;
   if (!source) return 'Open a photograph to begin.';
   const L = look();
   // Everything here that came from a file, a camera or a link is escaped: the info line is HTML.
   const parts: string[] = [];
   if (queueIndex >= 0 && queue[queueIndex]?.source === source && queue.length > 1) parts.push(`<b>${queueIndex + 1} / ${queue.length}</b>`);
   parts.push(`<b>${esc(source.label)}</b>`);
-  if (source.cameraModel) parts.push(esc(source.cameraModel));
   parts.push(`${source.full.width}×${source.full.height}`);
-  if (source.iso) parts.push(`ISO ${source.iso.toFixed(0)}`);
-  if (source.shutter) parts.push(source.shutter >= 1 ? `${source.shutter.toFixed(1)} s` : `1/${(1 / source.shutter).toFixed(0)} s`);
-  if (source.baselineEV) parts.push(`baseline ${fmtEV(source.baselineEV)}`);
   parts.push(`timed ${fmtEV(L.timingEV)}`);
-  parts.push(`print ${fmtEV(L.printExposureEV)}`);
-  parts.push(`decoded in ${(source.decodeMs / 1000).toFixed(1)} s`);
-  if (source.kind === 'display') parts.push('developed as display-referred data');
+  if (L.printExposureEV !== 0) parts.push(`print ${fmtEV(L.printExposureEV)}`);
   if (loupe) parts.push(`1:1 crop at ${loupe.crop.x},${loupe.crop.y}`);
   if (batch) parts.push(`<b>saving the set · ${batch.done} / ${batch.total}</b>`);
   if (showingCamera && cameraBitmap?.source === source) {
@@ -143,19 +143,59 @@ function describe(): string {
     const scaled = b.width < source.full.width || b.height < source.full.height;
     parts.push(`<b>the camera's own rendering · ${b.width}×${b.height}${scaled ? ' preview, scaled' : ''}</b>`);
   } else if (showingA && pinned) parts.push(`<b>showing A · ${esc(pinned.parameters.name)}</b>`);
+  else if (comparing) parts.push('<b>the plain decode</b>');
   return parts.join(' · ');
 }
+
+/** The second line, shown on request: where the photograph came from and how it was read. */
+function describeDetails(): string {
+  if (!source) return '';
+  const L = look();
+  const parts: string[] = [];
+  if (source.cameraModel) parts.push(esc(source.cameraModel));
+  if (source.iso) parts.push(`ISO ${source.iso.toFixed(0)}`);
+  if (source.shutter) parts.push(source.shutter >= 1 ? `${source.shutter.toFixed(1)} s` : `1/${(1 / source.shutter).toFixed(0)} s`);
+  if (source.baselineEV) parts.push(`baseline ${fmtEV(source.baselineEV)}`);
+  parts.push(`print ${fmtEV(L.printExposureEV)}`);
+  parts.push(`decoded in ${(source.decodeMs / 1000).toFixed(1)} s`);
+  if (source.kind === 'display') parts.push('developed as display-referred data');
+  if (source.cameraJPEG) parts.push(`embedded JPEG ${source.cameraJPEG.width}×${source.cameraJPEG.height}`);
+  return parts.join(' · ');
+}
+
+/** Writes the info line and, when open, the details line. */
+function refreshInfo() {
+  info.innerHTML = describe();
+  detailsButton.hidden = !source || !!camera;
+  const open = detailsButton.getAttribute('aria-expanded') === 'true';
+  details.hidden = !(open && source && !camera);
+  if (!details.hidden) details.innerHTML = describeDetails();
+}
+
+/** A message of its own under the facts: cleared after a few seconds unless it is progress or an error. */
+let statusTimer = 0;
+function setStatus(html: string, options: { sticky?: boolean; error?: boolean } = {}) {
+  window.clearTimeout(statusTimer);
+  status.innerHTML = html;
+  status.hidden = !html;
+  status.classList.toggle('error', !!options.error);
+  if (html && !options.sticky && !options.error) statusTimer = window.setTimeout(() => { status.hidden = true; }, 6000);
+}
+function clearStatus() { window.clearTimeout(statusTimer); status.hidden = true; status.innerHTML = ''; }
 
 /** Touch devices get shorter hints and none about keys. */
 const touchOnly = () => window.matchMedia('(hover: none)').matches;
 
+let hintTimer = 0;
 function updateHint() {
   const touch = touchOnly();
-  const bits = [touch ? 'hold to compare' : 'hold to compare with the plain decode', loupe ? 'drag to move · double-tap to leave 1:1' : 'double-tap for 1:1'];
-  if (queue.length > 1 && !touch) bits.push('← → for the next photograph');
-  if (pinned && !touch) bits.push('hold A for the pinned look');
-  if (source?.cameraJPEG && !touch) bits.push("hold C for the camera's own rendering");
+  const bits = loupe ? ['drag to move', 'double-tap to leave 1:1'] : ['hold to compare', 'double-tap for 1:1'];
+  if (!touch && !loupe) bits.push('? for the keys');
   hint.textContent = bits.join(' · ');
+  hint.hidden = false;
+  hint.classList.remove('faded');
+  window.clearTimeout(hintTimer);
+  hintTimer = window.setTimeout(() => hint.classList.add('faded'), 5000);
 }
 
 /** Shows or hides the Laboratory. On phones it is a sheet over the lower screen: the stage then pads its bottom by
@@ -241,7 +281,7 @@ function updateReadout() {
 
 function renderStill() {
   if (!source) return;
-  if (showingCamera && cameraBitmap?.source === source) { renderCameraRendering(cameraBitmap.bitmap); info.innerHTML = describe(); updateReadout(); return; }
+  if (showingCamera && cameraBitmap?.source === source) { renderCameraRendering(cameraBitmap.bitmap); refreshInfo(); updateReadout(); return; }
   const L = look();
   const scale = exposureScaleFor(L.parameters, source.baselineEV, L.printExposureEV + L.timingEV);
   if (loupe) {
@@ -252,7 +292,7 @@ function renderStill() {
     if (comparing) engine.renderPlain(previewTexture, scale, output);
     else engine.render(previewTexture, L.parameters, { exposureScale: scale, spatial: true, output });
   }
-  info.innerHTML = describe();
+  refreshInfo();
   updateReadout();
 }
 
@@ -292,8 +332,11 @@ async function showSource(s: DecodedSource) {
   saveButton.hidden = false;
   captureButton.hidden = true;
   stopCameraButton.hidden = true;
-  cameraHoldButton.hidden = !s.cameraJPEG;
+  compare.hidden = false;
+  compareCamera.hidden = !s.cameraJPEG;
+  compareA.hidden = !pinned;
   showingCamera = false;
+  clearStatus();
   renderStill();
 }
 
@@ -326,10 +369,10 @@ async function setCameraHeld(on: boolean) {
   if (on && cameraBitmap?.source !== source) {
     const src = source;
     let bitmap: ImageBitmap | null = null;
-    try { bitmap = await cameraRendering(src); } catch (e) { info.innerHTML = `<b>The camera's rendering could not be decoded.</b> ${esc((e as Error).message)}`; return; }
+    try { bitmap = await cameraRendering(src); } catch (e) { setStatus(`<b>The camera's rendering could not be decoded.</b> ${esc((e as Error).message)}`, { error: true }); return; }
     if (!bitmap || source !== src) return;
   }
-  if (showingCamera !== cameraHeld) { showingCamera = cameraHeld; scheduleRender(); }
+  if (showingCamera !== cameraHeld) { showingCamera = cameraHeld; compareCamera.classList.toggle('held', showingCamera); scheduleRender(); }
 }
 
 // MARK: the set of photographs
@@ -375,7 +418,7 @@ async function showEntry(index: number) {
     try {
       await decodeEntry(entry);
     } catch (e) {
-      if (serial === openSerial) info.innerHTML = `<b>Could not open ${esc(entry.file.name)}.</b> ${esc((e as Error).message)}`;
+      if (serial === openSerial) setStatus(`<b>Could not open ${esc(entry.file.name)}.</b> ${esc((e as Error).message)}`, { error: true });
       return;
     } finally {
       if (serial === openSerial) setBusy(false);
@@ -390,7 +433,7 @@ async function showEntry(index: number) {
 /** Opens a set of files as the new queue (sorted by name) and shows the first. A single file is always tried. */
 async function openFiles(files: File[]) {
   const list = files.length === 1 ? files : files.filter((f) => isOpenable(f.name));
-  if (!list.length) { info.innerHTML = '<b>Nothing to open.</b> Drop DNGs (or any RAW LibRaw reads), JPEGs or PNGs.'; return; }
+  if (!list.length) { setStatus('<b>Nothing to open.</b> Drop DNGs (or any RAW LibRaw reads), JPEGs or PNGs.', { error: true }); return; }
   list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   queue = list.map((file) => ({ file, lastUsed: 0 }));
   queueIndex = -1;
@@ -486,7 +529,8 @@ async function openCamera() {
     saveButton.hidden = true;
     captureButton.hidden = false;
     stopCameraButton.hidden = false;
-    cameraHoldButton.hidden = true;
+    compare.hidden = true;
+    clearStatus();
     cameraTimingEV = 0; frameCounter = 0;
     const loop = () => {
       if (!camera) return;
@@ -508,12 +552,12 @@ async function openCamera() {
       const scale = exposureScaleFor(p, 0, L.printExposureEV + cameraTimingEV);
       if (comparing) engine.renderPlain(cameraTexture, scale, output);
       else engine.render(cameraTexture, p, { exposureScale: scale, spatial: false, output });
-      if (frameCounter % 15 === 0) info.innerHTML = describe();
+      if (frameCounter % 15 === 0) refreshInfo();
       if (frameCounter % 30 === 0) updateReadout();
     };
     loop();
   } catch (e) {
-    info.innerHTML = `<b>The camera could not be started.</b> ${esc((e as Error).message)}`;
+    setStatus(`<b>The camera could not be started.</b> ${esc((e as Error).message)}`, { error: true });
   } finally {
     cameraStarting = false;
     setBusy(false);
@@ -596,11 +640,11 @@ async function saveJPEG() {
   setBusy(true);
   try {
     const L = look();
-    const print = await developPrint(source, L, (done, total) => { if (total > 1) info.innerHTML = `${describe()} · <b>developing ${done} / ${total}</b>`; });
+    const print = await developPrint(source, L, (done, total) => { if (total > 1) setStatus(`developing ${done} / ${total}`, { sticky: true }); });
     download(print.blob, printName(source, L));
-    info.innerHTML = `${describe()} · <b>saved ${print.width}×${print.height}${print.note}</b>`;
+    setStatus(`<b>saved ${print.width}×${print.height}</b>${esc(print.note)}`);
   } catch (e) {
-    info.innerHTML = `<b>Could not save.</b> ${esc((e as Error).message)}`;
+    setStatus(`<b>Could not save.</b> ${esc((e as Error).message)}`, { error: true });
   } finally {
     setBusy(false);
   }
@@ -637,7 +681,7 @@ async function saveSet() {
       }
       if (!queue.includes(entry) && entry.source !== source) delete entry.source;   // no longer in the set shown: do not keep its decode
       batch.done++;
-      info.innerHTML = describe();
+      refreshInfo();
     }
     const saved = Object.keys(files).length;
     if (saved) {
@@ -650,10 +694,11 @@ async function saveSet() {
     batch = null;
     const summary = [`<b>${cancelled ? 'stopped after' : 'saved'} ${saved} print${saved === 1 ? '' : 's'}${saved ? ' as a zip, with the look as JSON' : ''}</b>`];
     if (skipped.length) summary.push(`skipped ${skipped.length}: ${esc(skipped.join('; '))}`);
-    info.innerHTML = `${describe()} · ${summary.join(' · ')}`;
+    refreshInfo();
+    setStatus(summary.join(' · '), { sticky: skipped.length > 0 });
   } catch (e) {
     batch = null;
-    info.innerHTML = `<b>Could not save the set.</b> ${esc((e as Error).message)}`;
+    setStatus(`<b>Could not save the set.</b> ${esc((e as Error).message)}`, { error: true });
   } finally {
     batch = null;
     setBusy(false);
@@ -665,16 +710,17 @@ async function saveSet() {
 function pinLook() {
   pinned = { parameters: cloneParameters(state.parameters), printExposureEV: state.printExposureEV, timingEV };
   pinButton.textContent = 'Re-pin as A';
-  showAButton.hidden = false;
+  compareA.hidden = !source || !!camera;
   updateHint();
-  info.innerHTML = `${describe()} · <b>pinned the current look as A</b>`;
+  setStatus('<b>pinned the current look as A</b> · hold A to see it');
 }
 
 function setShowingA(on: boolean) {
   if (!pinned || showingA === on) return;
   showingA = on;
   scheduleRender();
-  if (camera) info.innerHTML = describe();
+  compareA.classList.toggle('held', on);
+  if (camera) refreshInfo();
 }
 
 // MARK: wiring
@@ -682,7 +728,7 @@ function setShowingA(on: boolean) {
 $<HTMLButtonElement>('openButton').addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => { const files = Array.from(fileInput.files ?? []); fileInput.value = ''; if (files.length) void openFiles(files); });
 $<HTMLButtonElement>('cameraButton').addEventListener('click', () => void openCamera());
-stopCameraButton.addEventListener('click', () => { stopCamera(); if (!source) { view.hidden = true; drop.hidden = false; badge.hidden = true; } info.innerHTML = describe(); });
+stopCameraButton.addEventListener('click', () => { stopCamera(); if (!source) { view.hidden = true; drop.hidden = false; badge.hidden = true; } refreshInfo(); });
 captureButton.addEventListener('click', () => void photograph());
 saveButton.addEventListener('click', () => void saveJPEG());
 saveAllButton.addEventListener('click', () => void saveSet());
@@ -697,8 +743,10 @@ $<HTMLButtonElement>('resetButton').addEventListener('click', () => {
   const fresh = defaultLabState();
   state.parameters = fresh.parameters; state.printExposureEV = 0;
   buildLab(labBody, state, () => scheduleRender());
+  syncLookName();
   remeasure();
   scheduleRender();
+  setStatus('<b>reset to Technichrome v1</b>');
 });
 // The look as JSON: the engine parameters (what the app and the Python tools read) plus the print exposure,
 // which import restores and the app ignores.
@@ -719,10 +767,12 @@ importInput.addEventListener('change', async () => {
     state.parameters = parametersFromJSON(json);
     if (typeof json.printExposureEV === 'number' && Number.isFinite(json.printExposureEV)) state.printExposureEV = Math.max(-2, Math.min(2, json.printExposureEV));
     buildLab(labBody, state, () => scheduleRender());
+    syncLookName();
     remeasure();
     scheduleRender();
+    setStatus(`<b>imported ${esc(f.name)}</b>`);
   } catch (e) {
-    info.innerHTML = `<b>Could not import ${esc(f.name)}.</b> ${esc((e as Error).message)}`;
+    setStatus(`<b>Could not import ${esc(f.name)}.</b> ${esc((e as Error).message)}`, { error: true });
   }
 });
 pinButton.addEventListener('click', pinLook);
@@ -733,7 +783,7 @@ linkButton.addEventListener('click', async () => {
   history.replaceState(null, '', `#${hash}`);
   let copied = false;
   try { await navigator.clipboard.writeText(location.href); copied = true; } catch { /* no clipboard access: the address bar has it */ }
-  info.innerHTML = `${describe()} · <b>${copied ? 'link copied' : 'the address bar now carries this look'}</b> (${(location.href.length / 1024).toFixed(1)} KB)`;
+  setStatus(`<b>${copied ? 'link copied' : 'the address bar now carries this look'}</b> (${(location.href.length / 1024).toFixed(1)} KB)`);
 });
 function applyLinkedLook() {
   if (!location.hash) return;
@@ -745,26 +795,42 @@ function applyLinkedLook() {
     buildLab(labBody, state, () => scheduleRender());
     remeasure();
     scheduleRender();
-    info.innerHTML = `${describe()} · <b>look from the link: ${esc(shared.parameters.name)}</b>`;
+    syncLookName();
+    setStatus(`<b>look from the link: ${esc(shared.parameters.name)}</b>`);
   } catch (e) {
-    info.innerHTML = `<b>Could not read the look in this link.</b> ${esc((e as Error).message)}`;
+    setStatus(`<b>Could not read the look in this link.</b> ${esc((e as Error).message)}`, { error: true });
   }
 }
 window.addEventListener('hashchange', applyLinkedLook);
-showAButton.addEventListener('pointerdown', (e) => { e.preventDefault(); setShowingA(true); });
-for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) showAButton.addEventListener(ev, () => setShowingA(false));
-cameraHoldButton.addEventListener('pointerdown', (e) => { e.preventDefault(); void setCameraHeld(true); });
-for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) cameraHoldButton.addEventListener(ev, () => void setCameraHeld(false));
+// Hold to compare: the plain decode, the look pinned as A, the camera's own JPEG. Each button is lit while held.
+const holdButton = (button: HTMLButtonElement, set: (on: boolean) => void) => {
+  button.addEventListener('pointerdown', (e) => { e.preventDefault(); try { button.setPointerCapture(e.pointerId); } catch { /* fine */ } set(true); });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave']) button.addEventListener(ev, () => set(false));
+};
+holdButton(comparePlain, (on) => { if (comparing === on) return; comparing = on; comparePlain.classList.toggle('held', on); scheduleRender(); });
+holdButton(compareA, setShowingA);
+holdButton(compareCamera, (on) => void setCameraHeld(on));
+detailsButton.addEventListener('click', () => {
+  const open = detailsButton.getAttribute('aria-expanded') !== 'true';
+  detailsButton.setAttribute('aria-expanded', String(open));
+  detailsButton.textContent = open ? 'Less' : 'Details';
+  refreshInfo();
+});
+
+/** The Laboratory's heading names the look in use. */
+function syncLookName() { lookName.textContent = state.parameters.name || 'Untitled look'; }
 
 // On the image: hold still to compare with the plain decode (after a short delay, so a tap does not flash),
 // double-tap (or double-click) for the loupe, drag inside the loupe to move it.
 let compareTimer = 0;
 let lastTap = { time: 0, x: 0, y: 0 };
 let drag: { pointerId: number; x: number; y: number; cropX: number; cropY: number; moved: boolean } | null = null;
-const endCompare = () => { window.clearTimeout(compareTimer); if (!comparing) return; comparing = false; scheduleRender(); };
+const endCompare = () => { window.clearTimeout(compareTimer); if (!comparing) return; comparing = false; comparePlain.classList.remove('held'); scheduleRender(); };
 view.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  const now = performance.now();
+  // When the finger landed, not when a main thread busy with a render got round to the event: two quick taps
+  // either side of a long frame are still one double-tap.
+  const now = e.timeStamp;
   const double = now - lastTap.time < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30;
   lastTap = { time: double ? 0 : now, x: e.clientX, y: e.clientY };
   if (double) {
@@ -778,7 +844,7 @@ view.addEventListener('pointerdown', (e) => {
     try { view.setPointerCapture(e.pointerId); } catch { /* not every pointer can be captured */ }
   }
   window.clearTimeout(compareTimer);
-  compareTimer = window.setTimeout(() => { comparing = true; scheduleRender(); }, 180);
+  compareTimer = window.setTimeout(() => { comparing = true; comparePlain.classList.add('held'); scheduleRender(); }, 180);
 });
 view.addEventListener('pointermove', (e) => {
   if (!drag || !loupe || e.pointerId !== drag.pointerId) return;
@@ -823,7 +889,8 @@ stage.addEventListener('drop', (e) => {
 });
 
 // Timing depends on the parameters, so re-measure when the Laboratory changes them.
-labBody.addEventListener('input', remeasure);
+labBody.addEventListener('input', () => { remeasure(); refreshInfo(); });
 
-info.innerHTML = describe();
+refreshInfo();
+syncLookName();
 applyLinkedLook();

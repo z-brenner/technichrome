@@ -17,12 +17,11 @@
 <body>
   <header class="bar">
     <div class="wordmark">TECHNICHROME</div>
-    <div class="sub" id="engineLabel">web · the same engine as the iPhone app · nothing leaves this device</div>
     <nav class="actions">
-      <button id="openButton" class="pill" type="button">Open a photograph</button>
-      <button id="cameraButton" class="pill" type="button">Use the camera</button>
-      <button id="labButton" class="pill" type="button">Laboratory</button>
-      <button id="helpButton" class="pill" type="button" aria-label="Help" title="What the keys and gestures do">?</button>
+      <button id="openButton" class="pill" type="button" title="Open one photograph, several, or a folder">Open</button>
+      <button id="cameraButton" class="pill" type="button" title="A live preview through the engine (not RAW)">Camera</button>
+      <button id="labButton" class="pill" type="button" title="Every parameter of the look">Laboratory</button>
+      <button id="helpButton" class="pill round" type="button" aria-label="Help" title="Keys and gestures">?</button>
       <input id="fileInput" type="file" multiple accept=".dng,.DNG,image/*,.tif,.tiff,.cr2,.cr3,.nef,.arw,.raf,.orf,.rw2,.pef" hidden />
     </nav>
   </header>
@@ -32,12 +31,12 @@
       <div id="drop" class="drop">
         <div class="drop-title">Drop DNGs here</div>
         <div class="drop-body">One, several, or a folder: a Bayer RAW from the app or another camera app, an Apple ProRAW, or any DNG LibRaw reads. JPEG and PNG work too, labelled as what they are: not RAW.</div>
-        <div class="drop-foot">Everything runs in this tab. No upload, no account.</div>
+        <div class="drop-foot">Everything runs in this tab. No upload, no account.<br /><span id="renderingNote">The same engine as the iPhone app.</span></div>
       </div>
       <canvas id="view" class="view" hidden></canvas>
       <video id="video" class="hidden" playsinline muted autoplay></video>
       <div id="badge" class="badge" hidden></div>
-      <div id="hint" class="hint" hidden>hold to compare with the plain decode · double-tap for 1:1</div>
+      <div id="hint" class="hint" hidden></div>
       <div id="busy" class="busy" hidden><span></span><div id="busyText" class="busy-text" hidden></div></div>
     </section>
 
@@ -47,19 +46,21 @@
         <button id="labClose" class="icon" type="button" aria-label="Close the laboratory">×</button>
       </div>
       <div class="readout">
-        <canvas id="histogram" width="340" height="72" aria-label="Histogram of what is on screen"></canvas>
+        <canvas id="histogram" width="340" height="64" aria-label="Histogram of what is on screen"></canvas>
         <div id="readoutText" class="readout-text">—</div>
       </div>
-      <div id="labBody" class="lab-body"></div>
-      <div class="lab-foot">
-        <button id="resetButton" class="pill" type="button">Reset to Technichrome v1</button>
-        <button id="exportButton" class="pill" type="button">Export JSON</button>
-        <button id="importButton" class="pill" type="button">Import JSON</button>
-        <input id="importInput" type="file" accept="application/json,.json" hidden />
-        <button id="pinButton" class="pill" type="button" title="Keep the current look as A, then hold the A key (or this button) to see it again">Pin as A</button>
-        <button id="linkButton" class="pill" type="button" title="Put this look in the address bar and on the clipboard: open the link anywhere to get it back">Copy link</button>
-        <button id="showAButton" class="pill" type="button" hidden title="Hold to show the pinned look">Hold for A</button>
+      <div class="look">
+        <div class="look-name" id="lookName">Technichrome v1</div>
+        <div class="look-actions">
+          <button id="resetButton" class="text" type="button" title="Back to the shipped look">Reset</button>
+          <button id="exportButton" class="text" type="button" title="The look as JSON, the form the app and the Python tools read">Export</button>
+          <button id="importButton" class="text" type="button" title="A look from JSON">Import</button>
+          <button id="linkButton" class="text" type="button" title="Put this look in the address bar and on the clipboard">Copy link</button>
+          <button id="pinButton" class="text" type="button" title="Keep this look as A, then hold A (key or button) to see it against the sliders">Pin as A</button>
+          <input id="importInput" type="file" accept="application/json,.json" hidden />
+        </div>
       </div>
+      <div id="labBody" class="lab-body"></div>
     </aside>
   </main>
 
@@ -67,32 +68,41 @@
     <div class="help-card">
       <div class="lab-title">KEYS AND GESTURES</div>
       <dl>
-        <dt>Hold the picture</dt><dd>the plain decode, for comparison</dd>
+        <dt>Hold the picture</dt><dd>the plain decode, for comparison (or the Plain button)</dd>
         <dt>Double-tap / double-click</dt><dd>a 1:1 crop of the full decode; drag to move it; again, or Esc, to leave</dd>
         <dt>← →</dt><dd>the previous or next photograph of the set</dd>
-        <dt>Hold A</dt><dd>the look pinned as A in the Laboratory</dd>
-        <dt>Hold C</dt><dd>the camera's own rendering (the JPEG in the file)</dd>
+        <dt>Hold A</dt><dd>the look pinned as A in the Laboratory (or the A button)</dd>
+        <dt>Hold C</dt><dd>the camera's own rendering, the JPEG in the file (or the Camera button)</dd>
         <dt>Esc</dt><dd>stops a Save all, leaves the loupe, closes the Laboratory or this</dd>
         <dt>?</dt><dd>this</dd>
       </dl>
-      <div class="help-foot">On a phone the hold buttons in the footer and the Laboratory do what the keys do.</div>
+      <div class="help-foot"><span id="helpNote">The same engine as the iPhone app.</span> Nothing leaves this device: decoding, the engine and the export all run in this tab.</div>
       <button id="helpClose" class="pill" type="button">Close</button>
     </div>
   </div>
 
   <footer class="foot">
-    <div id="info" class="info">Open a photograph to begin.</div>
+    <div class="foot-text">
+      <div id="info" class="info">Open a photograph to begin.</div>
+      <div id="details" class="details" hidden></div>
+      <div id="status" class="status" hidden></div>
+    </div>
     <div class="foot-actions">
       <div id="queueNav" class="nav" hidden>
-        <button id="prevButton" class="pill" type="button" aria-label="Previous photograph">‹</button>
+        <button id="prevButton" class="pill small" type="button" aria-label="Previous photograph">‹</button>
         <span id="counter" class="counter"></span>
-        <button id="nextButton" class="pill" type="button" aria-label="Next photograph">›</button>
+        <button id="nextButton" class="pill small" type="button" aria-label="Next photograph">›</button>
       </div>
+      <div id="compare" class="compare" hidden role="group" aria-label="Hold to compare">
+        <button id="comparePlain" type="button" title="Hold: the plain decode">Plain</button>
+        <button id="compareA" type="button" hidden title="Hold: the look pinned as A">A</button>
+        <button id="compareCamera" type="button" hidden title="Hold: the camera's own JPEG">Camera</button>
+      </div>
+      <button id="detailsButton" class="text" type="button" hidden aria-expanded="false">Details</button>
       <button id="captureButton" class="pill prominent" type="button" hidden>Photograph</button>
       <button id="saveButton" class="pill prominent" type="button" hidden>Save JPEG</button>
       <button id="saveAllButton" class="pill" type="button" hidden title="Develop every photograph of the set with this look and download one zip">Save all</button>
-      <button id="cameraHoldButton" class="pill" type="button" hidden title="Hold to see the camera's own rendering: the JPEG the camera embedded in this file">Camera's JPEG</button>
-      <button id="stopCameraButton" class="pill" type="button" hidden>Stop the camera</button>
+      <button id="stopCameraButton" class="pill" type="button" hidden>Stop</button>
     </div>
   </footer>
 

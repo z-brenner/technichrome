@@ -105,12 +105,38 @@ function segmented(title: string, options: [string, number][], get: () => number
 }
 
 /** Builds the panel. `onChange` is called after every edit; `onCubeChange` is implied by the engine's own cache key. */
+const OPEN_KEY = 'technichrome-lab-open';
+
+/** Which sections are open: Exposure by default, then whatever was last chosen (kept per browser, best effort). */
+function openSections(): Record<string, boolean> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPEN_KEY) ?? 'null');
+    if (saved && typeof saved === 'object') return saved as Record<string, boolean>;
+  } catch { /* no storage: the defaults */ }
+  return { Exposure: true };
+}
+
+function rememberOpen(open: Record<string, boolean>) {
+  try { localStorage.setItem(OPEN_KEY, JSON.stringify(open)); } catch { /* no storage: nothing kept */ }
+}
+
 export function buildLab(container: HTMLElement, state: LabState, onChange: () => void) {
   const render = () => {
     container.innerHTML = '';
+    const open = openSections();
     for (const section of SECTIONS) {
-      const sec = document.createElement('div'); sec.className = 'section';
-      const title = document.createElement('div'); title.className = 'section-title'; title.textContent = section.title; sec.appendChild(title);
+      const sec = document.createElement('div'); sec.className = 'section' + (open[section.title] ? ' open' : '');
+      const title = document.createElement('button'); title.type = 'button'; title.className = 'section-title'; title.textContent = section.title;
+      title.setAttribute('aria-expanded', String(!!open[section.title]));
+      title.addEventListener('click', () => {
+        const now = !sec.classList.contains('open');
+        sec.classList.toggle('open', now);
+        title.setAttribute('aria-expanded', String(now));
+        open[section.title] = now;
+        rememberOpen(open);
+      });
+      sec.appendChild(title);
+      const body = document.createElement('div'); body.className = 'section-body';
       for (const spec of section.sliders) {
         const row = document.createElement('div'); row.className = 'row';
         const head = document.createElement('div'); head.className = 'row-head';
@@ -141,9 +167,10 @@ export function buildLab(container: HTMLElement, state: LabState, onChange: () =
           }
           row.appendChild(note);
         }
-        sec.appendChild(row);
+        body.appendChild(row);
       }
-      if (section.extra) sec.appendChild(section.extra(state, () => { render(); onChange(); }));
+      if (section.extra) body.appendChild(section.extra(state, () => { render(); onChange(); }));
+      sec.appendChild(body);
       container.appendChild(sec);
     }
   };
