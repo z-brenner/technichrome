@@ -203,11 +203,13 @@ const server = http.createServer((req, res) => {
     const tallSheet = await page.locator('#lab').boundingBox();
     const exposureTitle = page.locator('#labBody .section-title', { hasText: /^Exposure$/ });   // a section's title, not a note that mentions exposure
     await exposureTitle.click();
-    await page.waitForTimeout(400);
+    // The observer's callback comes with the next frame, which the software GPU can be slow to reach: poll, do not sleep.
+    const roomOf = () => page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); return { overlap: s.bottom - l.top, pad: parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom) }; });
+    const followed = await page.waitForFunction(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); const overlap = s.bottom - l.top, pad = parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom); return overlap > 0 && Math.abs(pad - (Math.ceil(overlap) + 12)) <= 1; }, null, { timeout: 8000, polling: 100 }).then(() => true, () => false);
     const shrunkSheet = await page.locator('#lab').boundingBox();
-    const room = await page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); return { overlap: s.bottom - l.top, pad: parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom) }; });
+    const room = await roomOf();
     check(shrunkSheet.y > tallSheet.y + 20, `closing Exposure shrinks the sheet on a tall viewport (top ${tallSheet.y.toFixed(0)} → ${shrunkSheet.y.toFixed(0)})`);
-    check(room.overlap > 0 && Math.abs(room.pad - (Math.ceil(room.overlap) + 12)) <= 1, `the room under the picture follows the sheet (overlap ${room.overlap.toFixed(0)}, padding ${room.pad.toFixed(0)})`);
+    check(followed, `the room under the picture follows the sheet (overlap ${room.overlap.toFixed(0)}, padding ${room.pad.toFixed(0)})`);
     console.log(`sheet with Exposure closed on a 1000 px viewport: top ${tallSheet.y.toFixed(0)} → ${shrunkSheet.y.toFixed(0)}, padding ${room.pad.toFixed(0)} for an overlap of ${room.overlap.toFixed(0)}`);
     await exposureTitle.click();
     await page.setViewportSize(original);
