@@ -53,6 +53,9 @@ const server = http.createServer((req, res) => {
   await page.screenshot({ path: out, fullPage: false });
   const failures = [];
   const check = (cond, what) => { if (!cond) failures.push(what); };
+  // The preview must fit the stage whatever the header and footer take (a portrait photograph on a short screen).
+  const fit = await page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(); const v = document.getElementById('view').getBoundingClientRect(); return { inside: v.top >= s.top - 0.5 && v.bottom <= s.bottom + 0.5 && v.left >= s.left - 0.5 && v.right <= s.right + 0.5, s: [s.top, s.bottom].map(Math.round), v: [v.top, v.bottom].map(Math.round) }; });
+  check(fit.inside, `the preview lies inside the stage (stage ${fit.s.join('–')}, preview ${fit.v.join('–')})`);
   if (inputs.length > 1) {
     check(!(await page.isHidden('#queueNav')), 'the set navigation is shown for several files');
     check((await page.textContent('#counter')).trim() === `1 / ${inputs.length}`, 'the counter starts at 1');
