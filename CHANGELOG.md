@@ -3,6 +3,11 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 14 — drag the loupe, save the set (#15)
+- Drag inside the loupe to move the crop; the image around it is uploaded with a margin so most drags only move the window.
+- *Save all*: every photograph of the set developed with the look being shown, each with its own print timing, downloaded as one zip with the look's JSON; Escape stops it; undecodable files are skipped and named.
+- The smoke test now also saves a print and checks the JPEG's size, and saves the set and checks the zip.
+
 ## Round 13 — the web bench: 1:1 loupe, tiled export, sets, looks A/B (#14)
 - Double-tap the preview for a loupe: a crop of the full decode at 1:1 on the display, printed with the dye diffusion scaled to the whole image, so the spatial look can be judged before anything is saved.
 - *Save JPEG* develops any size in 1024 px tiles with a blur halo; `test:gl` checks the tiled result and a windowed crop are bitwise identical to a whole-image render (densities fetched by integer texel in the blur and print passes).

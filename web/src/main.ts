@@ -1,7 +1,7 @@
 // Technichrome in the browser. One screen: open photographs (one, several, a folder) or use the camera, see the
-// print, hold to compare with the plain decode, double-tap for a 1:1 crop, step through the set with ← →, pin a
-// look as A and hold to compare looks, adjust in the Laboratory, save a JPEG at full resolution. Everything
-// happens in this tab.
+// print, hold to compare with the plain decode, double-tap for a 1:1 crop and drag it around, step through the
+// set with ← →, pin a look as A and hold to compare looks, adjust in the Laboratory, save a JPEG at full
+// resolution or the whole set as a zip. Everything happens in this tab.
 
 import { type EngineParameters, cloneParameters, parametersFromJSON } from './engine/parameters';
 import { geometricMeanLuminance, timingExposureEV } from './engine/timing';
@@ -11,6 +11,8 @@ import { type DecodedSource, type LinearImage, type StoredImage, decodeFile, dow
 import { startCamera, type CameraSession } from './ui/camera';
 import { buildLab, defaultLabState, type LabState } from './ui/lab';
 import { installParityHook } from './parity';
+import { LOUPE_MAX_EDGE, LOUPE_HALO, type Rect, place, planCrop, regionFor, regionServes } from './ui/loupe';
+import { strToU8, zipSync } from 'fflate';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -20,12 +22,14 @@ const drop = $<HTMLDivElement>('drop');
 const badge = $<HTMLDivElement>('badge');
 const hint = $<HTMLDivElement>('hint');
 const busy = $<HTMLDivElement>('busy');
+const busyText = $<HTMLDivElement>('busyText');
 const info = $<HTMLDivElement>('info');
 const video = $<HTMLVideoElement>('video');
 const lab = $<HTMLElement>('lab');
 const labBody = $<HTMLDivElement>('labBody');
 const captureButton = $<HTMLButtonElement>('captureButton');
 const saveButton = $<HTMLButtonElement>('saveButton');
+const saveAllButton = $<HTMLButtonElement>('saveAllButton');
 const stopCameraButton = $<HTMLButtonElement>('stopCameraButton');
 const fileInput = $<HTMLInputElement>('fileInput');
 const importInput = $<HTMLInputElement>('importInput');
@@ -70,17 +74,18 @@ let openSerial = 0;
 let useClock = 0;
 const CACHE_BUDGET_BYTES = 700e6;
 
-/** The loupe: a crop of the full decode shown 1:1 in device pixels, uploaded with the widest halo the blur can need. */
-const LOUPE_HALO = 32;
-const LOUPE_MAX_EDGE = 4096;
-let loupe: { crop: SourceWindow; region: SourceWindow; texture: GLSource } | null = null;
+/** The loupe: a crop of the full decode shown 1:1 in device pixels, from a region uploaded with halo and margin. */
+let loupe: { crop: Rect; region: Rect; texture: GLSource } | null = null;
+
+/** A running "save all": progress for the overlay, and a flag Escape sets. */
+let batch: { done: number; total: number; cancelled: boolean } | null = null;
 
 buildLab(labBody, state, () => scheduleRender());
 installParityHook(engine);
 
 // MARK: helpers
 
-function setBusy(on: boolean) { busy.hidden = !on; }
+function setBusy(on: boolean, text = '') { busy.hidden = !on; busyText.textContent = text; busyText.hidden = !text; }
 
 function exposureScaleFor(p: EngineParameters, baselineEV: number, extraEV: number): number {
   return Math.pow(2, p.exposureEV + baselineEV + extraEV);
@@ -111,12 +116,13 @@ function describe(): string {
   parts.push(`decoded in ${(source.decodeMs / 1000).toFixed(1)} s`);
   if (source.kind === 'display') parts.push('developed as display-referred data');
   if (loupe) parts.push(`1:1 crop at ${loupe.crop.x},${loupe.crop.y}`);
+  if (batch) parts.push(`<b>saving the set · ${batch.done} / ${batch.total}</b>`);
   if (showingA && pinned) parts.push(`<b>showing A · ${pinned.parameters.name}</b>`);
   return parts.join(' · ');
 }
 
 function updateHint() {
-  const bits = ['hold to compare with the plain decode', loupe ? 'double-tap to leave 1:1' : 'double-tap for 1:1'];
+  const bits = ['hold to compare with the plain decode', loupe ? 'drag to move · double-tap to leave 1:1' : 'double-tap for 1:1'];
   if (queue.length > 1) bits.push('← → for the next photograph');
   if (pinned) bits.push('hold A for the pinned look');
   hint.textContent = bits.join(' · ');
@@ -197,6 +203,7 @@ async function showSource(s: DecodedSource) {
 
 function updateQueueNav() {
   queueNav.hidden = queue.length < 2;
+  saveAllButton.hidden = queue.length < 2;
   prevButton.disabled = queueIndex <= 0;
   nextButton.disabled = queueIndex >= queue.length - 1;
   counter.textContent = queue.length ? `${queueIndex + 1} / ${queue.length}` : '';
@@ -271,28 +278,37 @@ function filesFromDrop(dt: DataTransfer): Promise<File[]> {
 
 // MARK: the loupe
 
+/** Uploads the part of the full decode that serves `crop` (halo and drag margin included). */
+function uploadLoupeRegion(crop: Rect): { region: Rect; texture: GLSource } {
+  const full = source!.full;
+  const want = regionFor(crop, full);
+  const region = linearRegion(full, want.x, want.y, want.width, want.height);
+  const texture = engine.uploadLinear(region.rgb, region.width, region.height, loupe?.texture);
+  return { region: { x: region.x, y: region.y, width: region.width, height: region.height }, texture };
+}
+
 /** Opens a 1:1 crop of the full decode around a point of the canvas (CSS pixels relative to it). */
 function openLoupe(cssX: number, cssY: number) {
   if (!source || camera) return;
-  const full = source.full;
-  const px = cssX * view.width / Math.max(1, view.clientWidth), py = cssY * view.height / Math.max(1, view.clientHeight);
-  const fx = px * full.width / source.preview.width, fy = py * full.height / source.preview.height;
+  const point = { x: cssX * view.width / Math.max(1, view.clientWidth), y: cssY * view.height / Math.max(1, view.clientHeight) };
   const dpr = window.devicePixelRatio || 1;
   const maxEdge = Math.min(LOUPE_MAX_EDGE, engine.maxTextureSize - 2 * LOUPE_HALO);
-  const width = Math.max(32, Math.min(full.width, maxEdge, Math.round((stage.clientWidth - 32) * dpr)));
-  const height = Math.max(32, Math.min(full.height, maxEdge, Math.round((stage.clientHeight - 32) * dpr)));
-  const crop: SourceWindow = {
-    x: Math.max(0, Math.min(full.width - width, Math.round(fx - width / 2))),
-    y: Math.max(0, Math.min(full.height - height, Math.round(fy - height / 2))),
-    width, height,
-  };
-  const region = linearRegion(full, crop.x - LOUPE_HALO, crop.y - LOUPE_HALO, crop.width + 2 * LOUPE_HALO, crop.height + 2 * LOUPE_HALO);
-  const texture = engine.uploadLinear(region.rgb, region.width, region.height, loupe?.texture);
-  loupe = { crop, region: { x: region.x, y: region.y, width: region.width, height: region.height }, texture };
+  const crop = planCrop(source.full, source.preview, point, { width: stage.clientWidth - 32, height: stage.clientHeight - 32 }, dpr, maxEdge);
+  loupe = { crop, ...uploadLoupeRegion(crop) };
   fitCanvas(crop.width, crop.height, true);
   badge.textContent = `${source.kind === 'display' ? 'not raw · display-referred' : source.label} · 1:1`;
   updateHint();
   renderStill();
+}
+
+/** Moves the crop (dragging); the texture is re-uploaded only when the crop leaves what was uploaded. */
+function moveLoupe(x: number, y: number) {
+  if (!loupe || !source) return;
+  const crop = place({ ...loupe.crop, x: Math.round(x), y: Math.round(y) }, source.full);
+  if (crop.x === loupe.crop.x && crop.y === loupe.crop.y) return;
+  loupe.crop = crop;
+  if (!regionServes(crop, loupe.region, source.full)) Object.assign(loupe, uploadLoupeRegion(crop));
+  scheduleRender();
 }
 
 function closeLoupe(rerender = true) {
@@ -378,7 +394,7 @@ async function photograph() {
 // MARK: saving
 
 /** Develops `image` tile by tile into a canvas of its size and encodes a JPEG. Throws when the browser refuses the size. */
-async function developToBlob(image: StoredImage | LinearImage, p: EngineParameters, exposureScale: number): Promise<Blob> {
+async function developToBlob(image: StoredImage | LinearImage, p: EngineParameters, exposureScale: number, progress: (done: number, total: number) => void): Promise<Blob> {
   const canvas = document.createElement('canvas');
   canvas.width = image.width; canvas.height = image.height;
   const ctx = canvas.getContext('2d', output === 'displayP3' ? ({ colorSpace: 'display-p3' } as CanvasRenderingContext2DSettings) : undefined);
@@ -390,42 +406,107 @@ async function developToBlob(image: StoredImage | LinearImage, p: EngineParamete
       const data = output === 'displayP3' ? new ImageData(px, t.width, t.height, { colorSpace: 'display-p3' } as ImageDataSettings) : new ImageData(px, t.width, t.height);
       ctx.putImageData(data, t.x, t.y);
     },
-    onProgress: (done, total) => { if (total > 1) info.innerHTML = `${describe()} · <b>developing ${done} / ${total}</b>`; },
+    onProgress: progress,
   });
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
   if (!blob) throw new Error('JPEG encoding failed');
   return blob;
 }
 
+/** The print of a source with a look, at full size, or halved when the browser cannot produce the full size
+ *  (phones cap 2D canvases at around 16 megapixels). */
+async function developPrint(src: DecodedSource, L: Look, progress: (done: number, total: number) => void): Promise<{ blob: Blob; width: number; height: number; note: string }> {
+  const scale = exposureScaleFor(L.parameters, src.baselineEV, L.printExposureEV + L.timingEV);
+  let image: StoredImage | LinearImage = src.full;
+  let note = '';
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const blob = await developToBlob(image, L.parameters, scale, progress);
+      return { blob, width: image.width, height: image.height, note };
+    } catch (e) {
+      if (attempt >= 3 || Math.max(image.width, image.height) <= 2048) throw e;
+      image = downsample(src.full, Math.ceil(Math.max(image.width, image.height) / 2));
+      note = ` (reduced to ${image.width}×${image.height}: this browser could not produce the full size)`;
+    }
+  }
+}
+
+function download(blob: Blob, name: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+}
+
+function printName(src: DecodedSource, L: Look): string {
+  return `Technichrome-${src.fileName.replace(/\.[^.]+$/, '')}${L === pinned ? '-A' : ''}.jpg`;
+}
+
 async function saveJPEG() {
-  if (!source) return;
+  if (!source || batch) return;
   setBusy(true);
   try {
     const L = look();
-    const full = source.full;
-    const scale = exposureScaleFor(L.parameters, source.baselineEV, L.printExposureEV + L.timingEV);
-    let image: StoredImage | LinearImage = full;
-    let note = '';
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const blob = await developToBlob(image, L.parameters, scale);
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `Technichrome-${source.fileName.replace(/\.[^.]+$/, '')}${showingA && pinned ? '-A' : ''}.jpg`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-        info.innerHTML = `${describe()} · <b>saved ${image.width}×${image.height}${note}</b>`;
-        return;
-      } catch (e) {
-        // Phones cap 2D canvases at around 16 megapixels and GPUs their textures: halve the size and try again.
-        if (attempt >= 3 || Math.max(image.width, image.height) <= 2048) throw e;
-        image = downsample(full, Math.ceil(Math.max(image.width, image.height) / 2));
-        note = ` (reduced to ${image.width}×${image.height}: this browser could not produce the full size)`;
-      }
-    }
+    const print = await developPrint(source, L, (done, total) => { if (total > 1) info.innerHTML = `${describe()} · <b>developing ${done} / ${total}</b>`; });
+    download(print.blob, printName(source, L));
+    info.innerHTML = `${describe()} · <b>saved ${print.width}×${print.height}${print.note}</b>`;
   } catch (e) {
     info.innerHTML = `<b>Could not save.</b> ${(e as Error).message}`;
   } finally {
+    setBusy(false);
+  }
+}
+
+/** Develops every photograph of the set with the look being shown and downloads one zip: the prints and the look's JSON. */
+async function saveSet() {
+  if (queue.length < 2 || batch || camera) return;
+  const L = look();
+  const parameters = cloneParameters(L.parameters);
+  const printEV = L.printExposureEV;
+  batch = { done: 0, total: queue.length, cancelled: false };
+  const files: Record<string, Uint8Array> = {};
+  const skipped: string[] = [];
+  const progress = (name: string, tiles?: string) => setBusy(true, `saving the set · ${batch!.done + 1} / ${batch!.total} · ${name}${tiles ? ` · ${tiles}` : ''} · Esc stops`);
+  try {
+    for (let i = 0; i < queue.length && !batch.cancelled; i++) {
+      const entry = queue[i];
+      progress(entry.file.name, 'decoding');
+      let src = entry.source;
+      if (!src) {
+        try { src = await decodeFile(entry.file); } catch (e) { skipped.push(`${entry.file.name}: ${(e as Error).message}`); batch.done++; continue; }
+        entry.source = src;
+        entry.lastUsed = ++useClock;
+        evictCache();
+      }
+      if (batch.cancelled) break;
+      const lookFor: Look = { parameters, printExposureEV: printEV, timingEV: measureTiming(src, parameters) };
+      try {
+        const print = await developPrint(src, lookFor, (done, total) => progress(entry.file.name, `${done} / ${total}`));
+        files[printName(src, lookFor)] = new Uint8Array(await print.blob.arrayBuffer());
+      } catch (e) {
+        skipped.push(`${entry.file.name}: ${(e as Error).message}`);
+      }
+      batch.done++;
+      info.innerHTML = describe();
+    }
+    const saved = Object.keys(files).length;
+    if (saved) {
+      files[`${parameters.name.replace(/\s+/g, '-') || 'technichrome'}.json`] = strToU8(JSON.stringify({ ...parameters, printExposureEV: printEV }, null, 2));
+      // JPEGs do not compress: store them (level 0), which also keeps this fast on a phone.
+      const zip = zipSync(files, { level: 0 });
+      download(new Blob([zip as BlobPart], { type: 'application/zip' }), `Technichrome-${saved}-prints.zip`);
+    }
+    const cancelled = batch.cancelled;
+    batch = null;
+    const summary = [`<b>${cancelled ? 'stopped after' : 'saved'} ${saved} print${saved === 1 ? '' : 's'}${saved ? ' as a zip, with the look as JSON' : ''}</b>`];
+    if (skipped.length) summary.push(`skipped ${skipped.length}: ${skipped.join('; ')}`);
+    info.innerHTML = `${describe()} · ${summary.join(' · ')}`;
+  } catch (e) {
+    batch = null;
+    info.innerHTML = `<b>Could not save the set.</b> ${(e as Error).message}`;
+  } finally {
+    batch = null;
     setBusy(false);
   }
 }
@@ -455,6 +536,7 @@ $<HTMLButtonElement>('cameraButton').addEventListener('click', () => void openCa
 stopCameraButton.addEventListener('click', () => { stopCamera(); if (!source) { view.hidden = true; drop.hidden = false; badge.hidden = true; } info.innerHTML = describe(); });
 captureButton.addEventListener('click', () => void photograph());
 saveButton.addEventListener('click', () => void saveJPEG());
+saveAllButton.addEventListener('click', () => void saveSet());
 prevButton.addEventListener('click', () => void showEntry(queueIndex - 1));
 nextButton.addEventListener('click', () => void showEntry(queueIndex + 1));
 $<HTMLButtonElement>('labButton').addEventListener('click', () => { lab.hidden = !lab.hidden; });
@@ -491,10 +573,11 @@ pinButton.addEventListener('click', pinLook);
 showAButton.addEventListener('pointerdown', (e) => { e.preventDefault(); setShowingA(true); });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) showAButton.addEventListener(ev, () => setShowingA(false));
 
-// On the image: hold to compare with the plain decode (after a short delay, so a tap does not flash),
-// double-tap (or double-click) for the loupe.
+// On the image: hold still to compare with the plain decode (after a short delay, so a tap does not flash),
+// double-tap (or double-click) for the loupe, drag inside the loupe to move it.
 let compareTimer = 0;
 let lastTap = { time: 0, x: 0, y: 0 };
+let drag: { pointerId: number; x: number; y: number; cropX: number; cropY: number; moved: boolean } | null = null;
 const endCompare = () => { window.clearTimeout(compareTimer); if (!comparing) return; comparing = false; scheduleRender(); };
 view.addEventListener('pointerdown', (e) => {
   e.preventDefault();
@@ -507,10 +590,23 @@ view.addEventListener('pointerdown', (e) => {
     else { const r = view.getBoundingClientRect(); openLoupe(e.clientX - r.left, e.clientY - r.top); }
     return;
   }
+  if (loupe) {
+    drag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, cropX: loupe.crop.x, cropY: loupe.crop.y, moved: false };
+    try { view.setPointerCapture(e.pointerId); } catch { /* not every pointer can be captured */ }
+  }
   window.clearTimeout(compareTimer);
   compareTimer = window.setTimeout(() => { comparing = true; scheduleRender(); }, 180);
 });
-for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) view.addEventListener(ev, endCompare);
+view.addEventListener('pointermove', (e) => {
+  if (!drag || !loupe || e.pointerId !== drag.pointerId) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+  if (!drag.moved) { drag.moved = true; lastTap.time = 0; endCompare(); }
+  const dpr = window.devicePixelRatio || 1;   // the loupe is 1:1 in device pixels, so a CSS pixel of drag is dpr image pixels
+  moveLoupe(drag.cropX - dx * dpr, drag.cropY - dy * dpr);
+});
+const endPointer = () => { drag = null; endCompare(); };
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) view.addEventListener(ev, endPointer);
 view.addEventListener('contextmenu', (e) => e.preventDefault());
 view.addEventListener('dblclick', (e) => e.preventDefault());
 
@@ -523,11 +619,11 @@ window.addEventListener('keydown', (e) => {
   const onSlider = t instanceof HTMLInputElement;
   if (e.key === 'ArrowRight' && !onSlider) { e.preventDefault(); void showEntry(queueIndex + 1); }
   else if (e.key === 'ArrowLeft' && !onSlider) { e.preventDefault(); void showEntry(queueIndex - 1); }
-  else if (e.key === 'Escape') { if (loupe) closeLoupe(); else lab.hidden = true; }
+  else if (e.key === 'Escape') { if (batch) batch.cancelled = true; else if (loupe) closeLoupe(); else lab.hidden = true; }
   else if ((e.key === 'a' || e.key === 'A') && !e.repeat) setShowingA(true);
 });
 window.addEventListener('keyup', (e) => { if (e.key === 'a' || e.key === 'A') setShowingA(false); });
-window.addEventListener('blur', () => { setShowingA(false); endCompare(); });
+window.addEventListener('blur', () => { setShowingA(false); endPointer(); });
 
 // Drag and drop anywhere: files, a selection of files, or a folder.
 for (const ev of ['dragenter', 'dragover']) stage.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('active'); });

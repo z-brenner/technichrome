@@ -13,6 +13,7 @@
     "check": "npm run test && npm run build && npm run test:gl"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "libraw-wasm": "1.6.0"
   },
   "devDependencies": {
