@@ -53,6 +53,8 @@ const server = http.createServer((req, res) => {
   await page.screenshot({ path: out, fullPage: false });
   const failures = [];
   const check = (cond, what) => { if (!cond) failures.push(what); };
+  // The info line follows the next render, which the software GPU can take a while over: poll, do not sleep.
+  const infoSays = (text, wanted) => page.waitForFunction(([t, w]) => document.getElementById('info').textContent.includes(t) === w, [text, wanted], { timeout: 8000 }).then(() => true, () => false);
   // The preview must fit the stage whatever the header and footer take (a portrait photograph on a short screen).
   const fit = await page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(); const v = document.getElementById('view').getBoundingClientRect(); return { inside: v.top >= s.top - 0.5 && v.bottom <= s.bottom + 0.5 && v.left >= s.left - 0.5 && v.right <= s.right + 0.5, s: [s.top, s.bottom].map(Math.round), v: [v.top, v.bottom].map(Math.round) }; });
   check(fit.inside, `the preview lies inside the stage (stage ${fit.s.join('–')}, preview ${fit.v.join('–')})`);
@@ -73,9 +75,26 @@ const server = http.createServer((req, res) => {
     await page.waitForTimeout(300);
     console.log(`next in ${((Date.now() - t1) / 1000).toFixed(1)} s: ${await page.textContent('#info')}`);
     await page.screenshot({ path: out.replace(/\.png$/, '-2.png'), fullPage: false });
+    // The camera's own rendering: hold C. This file's embedded JPEG may be a small preview (then it says "scaled").
+    await page.keyboard.down('c');
+    check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering of the second file");
+    console.log(`camera's rendering (2): ${(await page.textContent('#info')).replace(/.*· (the camera.*)$/, '$1')}`);
+    await page.screenshot({ path: out.replace(/\.png$/, '-2-camera.png'), fullPage: false });
+    await page.keyboard.up('c');
+    check(await infoSays("the camera's own rendering", false), 'releasing C returns to the print');
     await page.keyboard.press('ArrowLeft');
     await page.waitForFunction((n) => document.getElementById('counter').textContent.trim() === `1 / ${n}` && document.getElementById('busy').hidden, inputs.length, { timeout: 120000 });
     check((await page.textContent('#info')).includes('1 / '), 'going back shows the first again');
+  }
+  // The camera's own rendering of the first file, in the preview and then inside the loupe.
+  const hasCamera = !(await page.isHidden('#cameraHoldButton'));
+  if (hasCamera) {
+    await page.keyboard.down('c');
+    check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering");
+    console.log(`camera's rendering (1): ${(await page.textContent('#info')).replace(/.*· (the camera.*)$/, '$1')}`);
+    await page.screenshot({ path: out.replace(/\.png$/, '-camera.png'), fullPage: false });
+    await page.keyboard.up('c');
+    check(await infoSays("the camera's own rendering", false), 'releasing C returns to the print');
   }
   // The loupe: a double-click (a touch double-tap on the phone) on the canvas shows a 1:1 crop; Escape leaves it.
   const box = await page.locator('#view').boundingBox();
@@ -98,6 +117,13 @@ const server = http.createServer((req, res) => {
   check((await page.textContent('#info')).includes('1:1 crop'), 'the info line names the crop');
   console.log(`loupe: ${await page.textContent('#info')}`);
   await page.screenshot({ path: out.replace(/\.png$/, '-loupe.png'), fullPage: false });
+  if (hasCamera) {
+    await page.keyboard.down('c');
+    check(await infoSays("the camera's own rendering", true), "holding C in the loupe shows the camera's rendering of the crop");
+    await page.screenshot({ path: out.replace(/\.png$/, '-loupe-camera.png'), fullPage: false });
+    await page.keyboard.up('c');
+    check(await infoSays("the camera's own rendering", false), 'releasing C in the loupe returns to the print');
+  }
   // Dragging inside the loupe moves the crop (mouse only: the touchscreen API has no drag).
   const before = (await page.textContent('#info')).match(/1:1 crop at (\d+),(\d+)/);
   if (mobile) await page.screenshot({ path: out.replace(/\.png$/, '-loupe.png'), fullPage: false });
@@ -163,8 +189,6 @@ const server = http.createServer((req, res) => {
   await page.click('#pinButton');
   check(!(await page.isHidden('#showAButton')), 'the hold-for-A button appears once pinned');
   await page.locator('#labBody input[type=range]').first().fill('0.5');
-  // The info line follows the next render, which the software GPU can take a while over: poll, do not sleep.
-  const infoSays = (text, wanted) => page.waitForFunction(([t, w]) => document.getElementById('info').textContent.includes(t) === w, [text, wanted], { timeout: 8000 }).then(() => true, () => false);
   await page.keyboard.down('a');
   check(await infoSays('showing A', true), 'holding A shows the pinned look');
   await page.keyboard.up('a');

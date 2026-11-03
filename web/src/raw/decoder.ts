@@ -40,6 +40,13 @@ export interface Region {
   rgb: Float32Array;
 }
 
+/** The JPEG the camera embedded in the file: its own rendering of the capture (Apple's for a ProRAW, full size). */
+export interface CameraJPEG {
+  bytes: Uint8Array;
+  width: number;
+  height: number;
+}
+
 export interface DecodedSource {
   kind: SourceKind;
   /** What to call it: "Bayer RAW", "Apple ProRAW", "Linear DNG", "Not RAW". */
@@ -54,7 +61,27 @@ export interface DecodedSource {
   full: StoredImage;
   /** A box-downsampled linear copy for interactive work (long edge ≤ PREVIEW_LONG_EDGE). */
   preview: LinearImage;
+  /** The camera's own JPEG rendering embedded in the file, when there is one, for comparison. */
+  cameraJPEG?: CameraJPEG;
   decodeMs: number;
+}
+
+/** Width and height from a JPEG's frame header (SOF), or null. */
+export function jpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let i = 2;
+  while (i + 9 < bytes.length) {
+    if (bytes[i] !== 0xff) return null;
+    const marker = bytes[i + 1];
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01 || marker === 0xff) { i += marker === 0xff ? 1 : 2; continue; }
+    const length = (bytes[i + 2] << 8) | bytes[i + 3];
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: (bytes[i + 5] << 8) | bytes[i + 6], width: (bytes[i + 7] << 8) | bytes[i + 8] };
+    }
+    if (marker === 0xda) return null;   // scan data before any frame header: not a baseline/progressive JPEG we can size
+    i += 2 + length;
+  }
+  return null;
 }
 
 /** LibRaw's 16-bit output codes → scene-linear (its BT.709 output curve, inverted exactly). */
@@ -75,7 +102,7 @@ export const PREVIEW_LONG_EDGE = 1600;
 
 /** Bytes held by a decoded source (its full decode and its preview). */
 export function sourceBytes(s: DecodedSource): number {
-  return s.full.samples.byteLength + s.preview.rgb.byteLength;
+  return s.full.samples.byteLength + s.preview.rgb.byteLength + (s.cameraJPEG?.bytes.byteLength ?? 0);
 }
 
 /** Scene-linear floats for the rectangle (x, y, w, h) of `img`, clamped to the image; the result says which rectangle it holds. */
@@ -171,7 +198,17 @@ export async function decodeRAW(file: File, bytes: Bytes): Promise<DecodedSource
     const baseline = meta?.color_data?.dng_levels?.baseline_exposure;
     const baselineEV = typeof baseline === 'number' && baseline > -900 && Number.isFinite(baseline) ? baseline : 0;
     const label = kind === 'bayer' ? 'Bayer RAW' : (make.toLowerCase().includes('apple') ? 'Apple ProRAW' : 'Linear DNG');
+    // The camera's own rendering, if the file embeds a JPEG preview (a ProRAW embeds Apple's at full size).
+    let cameraJPEG: CameraJPEG | undefined;
+    try {
+      const thumb = await raw.thumbnailData();
+      if (thumb && thumb.format === 'jpeg' && thumb.data instanceof Uint8Array && thumb.data.length > 0) {
+        const dims = jpegDimensions(thumb.data) ?? (thumb.width > 0 && thumb.height > 0 ? { width: thumb.width, height: thumb.height } : null);
+        if (dims) cameraJPEG = { bytes: thumb.data.slice(), width: dims.width, height: dims.height };
+      }
+    } catch { /* no usable embedded preview: nothing to compare with */ }
     return {
+      cameraJPEG,
       kind, label, fileName: file.name,
       cameraModel: [make, model].filter(Boolean).join(' ') || undefined,
       iso: typeof meta?.iso_speed === 'number' && meta.iso_speed > 0 ? meta.iso_speed : undefined,
