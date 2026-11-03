@@ -78,6 +78,7 @@ npm run test:gl      # GPU parity of the built site in headless Chromium, and ti
 node test/smoke.cjs out.png a.dng b.dng   # end to end on real files: opens them as a set, steps through it, opens
                      # and drags the loupe, pins a look and holds A, saves a print (checks the JPEG's size) and the
                      # set as a zip (checks its contents), screenshots (not in CI: it needs DNGs)
+MOBILE=1 node test/smoke.cjs out.png a.dng   # the same as an iPhone (touch double-tap, 3× display, the Laboratory sheet)
 ```
 
 The RAW decoder is a pthreads build and needs `SharedArrayBuffer`, so the page must be

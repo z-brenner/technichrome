@@ -121,10 +121,14 @@ function describe(): string {
   return parts.join(' · ');
 }
 
+/** Touch devices get shorter hints and none about keys. */
+const touchOnly = () => window.matchMedia('(hover: none)').matches;
+
 function updateHint() {
-  const bits = ['hold to compare with the plain decode', loupe ? 'drag to move · double-tap to leave 1:1' : 'double-tap for 1:1'];
-  if (queue.length > 1) bits.push('← → for the next photograph');
-  if (pinned) bits.push('hold A for the pinned look');
+  const touch = touchOnly();
+  const bits = [touch ? 'hold to compare' : 'hold to compare with the plain decode', loupe ? 'drag to move · double-tap to leave 1:1' : 'double-tap for 1:1'];
+  if (queue.length > 1 && !touch) bits.push('← → for the next photograph');
+  if (pinned && !touch) bits.push('hold A for the pinned look');
   hint.textContent = bits.join(' · ');
 }
 
