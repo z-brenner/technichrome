@@ -1,7 +1,9 @@
 // GLSL ES 3.0 kernels mirroring Technichrome/Engine/Kernels/Technichrome.metal pass for pass:
-//   separate  scene-linear → normalised dye densities (c, m, y)           [tc_separate]
+//   glow      highlight excess above a threshold, box-reduced; blurred by `blur` = halation  [tc_bloom_threshold + CIGaussianBlur]
+//   separate  scene-linear (+ glow) → normalised dye densities (c, m, y)   [tc_separate]
 //   blur      separable Gaussian on the densities = dye diffusion          [CIGaussianBlur]
-//   print     densities → dye cube → × key (sharp, from the source) → flare → surround → display  [tc_key + cube + tc_print]
+//   print     densities (misregistered) → dye cube → × key (sharp, from the source + glow) → flare → surround → display
+//                                                                          [misregister + cube + tc_key + tc_print]
 //   plain     scene-linear × exposure → display (the hold-to-compare view) [tc_linear_view]
 // The CPU reference (engine/reference.ts) is the specification; test/gl-parity.cjs checks these against it.
 
@@ -44,6 +46,21 @@ vec3 sceneLinear(sampler2D src, vec2 uv, int encoded, float exposureScale) {
   if (encoded == 1) s = srgbDecode(s);
   return max(s, vec3(0.0)) * exposureScale;
 }
+// The halation glow at a pixel of the whole image, given by its integer position (the source's origin in the
+// whole image plus the texel): integers in, so a tile or a crop samples the same float as the whole image would.
+// The glow field is small (a reduced, blurred copy of the preview) and sampled bilinearly in the image's own
+// normalised coordinates.
+vec3 glowAt(sampler2D glow, ivec2 position, vec2 fullSize) {
+  return max(texture(glow, (vec2(position) + 0.5) / fullSize).rgb, vec3(0.0));
+}
+// tc_scene_exposure: the scene plus the glow, times the exposure.
+vec3 sceneExposure(sampler2D src, vec2 uv, int encoded, float exposureScale, sampler2D glow, float bloomAmount, ivec2 position, vec2 fullSize) {
+  vec3 s = texture(src, uv).rgb;
+  if (encoded == 1) s = srgbDecode(s);
+  vec3 e = max(s, vec3(0.0));
+  if (bloomAmount > 0.0) e += bloomAmount * glowAt(glow, position, fullSize);
+  return e * exposureScale;
+}
 // Out-of-gamut handling for the sRGB display path: chroma scaled toward luminance, soft knee above 0.95
 // (the same operation the LUT builder applies to P3).
 vec3 softClipGamut(vec3 rgb) {
@@ -72,10 +89,14 @@ uniform vec4 uNeg;        // a, logE0, dMin, span
 uniform vec2 uNegShape;   // xHalf, nu
 uniform vec4 uMat;        // a, logE0, xHalf, nu
 uniform vec3 uDyeDMax, uDyeGain, uDyeLight, uDyeMask;
+uniform sampler2D uGlow;     // halation: the glow field of the whole image (unused when uBloomAmount is 0)
+uniform float uBloomAmount;
+uniform ivec2 uGlowOrigin;   // where this source sits in the whole image, in GL texels (x from the left, y from the bottom)
+uniform vec2 uGlowFull;      // the whole image's size
 in vec2 vUV;
 out vec4 outColor;
 void main() {
-  vec3 e = sceneLinear(uSource, vUV, uEncoded, uExposureScale);
+  vec3 e = sceneExposure(uSource, vUV, uEncoded, uExposureScale, uGlow, uBloomAmount, ivec2(gl_FragCoord.xy) + uGlowOrigin, uGlowFull);
   vec3 s = vec3(dot(uSepR, e), dot(uSepG, e), dot(uSepB, e));
   vec3 logS = log10v(max(s, vec3(1e-6)));
   vec3 dn;
@@ -89,6 +110,32 @@ void main() {
   dye.z = tcCurve(logPrint.z, uMat.x, uMat.y, 0.0, uDyeDMax.z, uMat.z, uMat.w) * uDyeGain.z / uDyeDMax.z;
   dye = clamp(dye, 0.0, 1.0) * uDyeMask;
   outColor = vec4(dye, 1.0);
+}`;
+
+// Halation, first pass: the highlight excess above the threshold (in the source's own linear units, before
+// exposure, as tc_bloom_threshold does), averaged over uFactor × uFactor blocks so the blur that follows runs
+// on a small image. Edge texels repeat beyond the image, like CI's clampedToExtent.
+export const GLOW_FRAG = `#version 300 es
+${COMMON}
+uniform sampler2D uSource;
+uniform int uEncoded;
+uniform float uThreshold;
+uniform int uFactor;
+out vec4 outColor;
+void main() {
+  ivec2 last = textureSize(uSource, 0) - 1;
+  ivec2 base = ivec2(gl_FragCoord.xy) * uFactor;
+  vec3 acc = vec3(0.0);
+  for (int y = 0; y < 64; y++) {
+    if (y >= uFactor) break;
+    for (int x = 0; x < 64; x++) {
+      if (x >= uFactor) break;
+      vec3 s = texelFetch(uSource, min(base + ivec2(x, y), last), 0).rgb;
+      if (uEncoded == 1) s = srgbDecode(s);
+      acc += max(s - vec3(uThreshold), vec3(0.0));
+    }
+  }
+  outColor = vec4(acc / float(uFactor * uFactor), 1.0);
 }`;
 
 // Densities are fetched by integer texel (texelFetch), never filtered: the sums are then the same floats in
@@ -132,11 +179,42 @@ uniform mat3 uP3ToSRGB;
 uniform vec2 uUVOrigin;     // the part of the source this viewport prints (a tile or crop of a larger image)
 uniform vec2 uUVScale;
 uniform ivec2 uWindowOrigin; // the same window in density texels
+uniform float uShift;        // misregistration in texels (0 = none): the dyes pulled apart at 120°, the key stays put
+uniform sampler2D uGlow;     // halation (see SEPARATE_FRAG)
+uniform float uBloomAmount;
+uniform ivec2 uGlowOrigin;
+uniform vec2 uGlowFull;
 in vec2 vUV;
 out vec4 outColor;
+// Bilinear read of the densities at texel + offset, from four integer fetches (edge clamped): the
+// integer part of the offset moves the texel, the fractional part weights the neighbours, and neither depends on
+// where the texel is, so a tile with its halo reads the same floats as the whole image. The same sampling CI
+// applies to a translated image.
+vec3 densityAt(ivec2 texel, vec2 offset) {
+  ivec2 last = textureSize(uDensities, 0) - 1;
+  vec2 whole = floor(offset);
+  ivec2 i0 = texel + ivec2(whole);
+  vec2 f = offset - whole;
+  vec3 a = texelFetch(uDensities, clamp(i0, ivec2(0), last), 0).rgb;
+  vec3 b = texelFetch(uDensities, clamp(i0 + ivec2(1, 0), ivec2(0), last), 0).rgb;
+  vec3 c = texelFetch(uDensities, clamp(i0 + ivec2(0, 1), ivec2(0), last), 0).rgb;
+  vec3 d = texelFetch(uDensities, clamp(i0 + ivec2(1, 1), ivec2(0), last), 0).rgb;
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
 void main() {
   vec2 uv = uUVOrigin + vUV * uUVScale;
-  vec3 dye = clamp(texelFetch(uDensities, ivec2(gl_FragCoord.xy) + uWindowOrigin, 0).rgb, 0.0, 1.0);
+  ivec2 texel = ivec2(gl_FragCoord.xy) + uWindowOrigin;
+  vec3 dye;
+  if (uShift > 0.0) {
+    // The app's misregister(): cyan moved by (+s, 0), magenta by (−s/2, +0.866 s), yellow by (−s/2, −0.866 s);
+    // a moved image shows, at a pixel, what lay the shift away in the other direction.
+    dye.r = densityAt(texel, -vec2(uShift, 0.0)).r;
+    dye.g = densityAt(texel, -vec2(-0.5 * uShift, 0.866 * uShift)).g;
+    dye.b = densityAt(texel, -vec2(-0.5 * uShift, -0.866 * uShift)).b;
+    dye = clamp(dye, 0.0, 1.0);
+  } else {
+    dye = clamp(texelFetch(uDensities, texel, 0).rgb, 0.0, 1.0);
+  }
   // The same trilinear interpolation as the CIColorCube and the CPU reference, done by hand with texelFetch so
   // the float cube needs no filtering extension (sampling a float texture with LINEAR is not core WebGL2).
   float n = uCubeDim - 1.0;
@@ -153,8 +231,8 @@ void main() {
     }
   }
   c = clamp(c, 0.0, 1.0);
-  // Silver key image from the green record of the unblurred source.
-  vec3 e = sceneLinear(uSource, uv, uEncoded, uExposureScale);
+  // Silver key image from the green record of the unblurred source (with the glow, as tc_key takes it).
+  vec3 e = sceneExposure(uSource, uv, uEncoded, uExposureScale, uGlow, uBloomAmount, texel + uGlowOrigin, uGlowFull);
   float g = dot(uSepG, e);
   float dn = tcCurve(log10f(max(g, 1e-6)), uNeg.x, uNeg.y, uNeg.z, uNeg.w, uNegShape.x, uNegShape.y);
   float k = tcCurve(-dn, uKey.x, uKey.y, 0.0, uKey.z, uKey.w, uKeyNu);

@@ -1,11 +1,12 @@
 // Full-resolution rendering in tiles, so an image of any size prints with a bounded amount of GPU memory
 // (one tile's source, three scratch targets and one output target at a time) and exactly like a whole-image
-// render would: every tile is uploaded with a halo as wide as the dye-diffusion radius, printed through a
-// window that leaves the halo out, and the image's own long edge sets the spatial scale.
+// render would: every tile is uploaded with a halo as wide as the spatial stages reach (the dye-diffusion radius
+// plus the misregistration), printed through a window that leaves the halo out, and the image's own long edge sets
+// the spatial scale. The halation glow, a whole-image quantity, is built once from the preview and shared by every tile.
 
 import { type EngineParameters } from '../engine/parameters';
 import { type LinearImage, type StoredImage, linearRegion } from '../raw/decoder';
-import { GLEngine, type GLSource, type OutputMode, diffusionKernel } from './engine';
+import { GLEngine, type GLSource, type GlowField, type OutputMode, spatialHalo } from './engine';
 
 export interface Tile { x: number; y: number; width: number; height: number }
 
@@ -35,6 +36,8 @@ export interface TiledRenderOptions {
   tile?: number;
   /** Read tiles back as floats (RGBA32F, for tests) instead of 8-bit (RGBA8, for JPEGs). */
   float?: boolean;
+  /** The halation glow of the whole image (see `GLEngine.buildGlow`); without it no glow is printed. */
+  glow?: GlowField;
   /** Receives every tile's pixels, rows top to bottom, 4 channels. */
   onTile: (pixels: Uint8ClampedArray<ArrayBuffer> | Float32Array, tile: Tile) => void;
   onProgress?: (done: number, total: number) => void;
@@ -45,7 +48,7 @@ export interface TiledRenderOptions {
 /** Renders `image` at full resolution, tile by tile, through `onTile`. Resolves when every tile has been delivered. */
 export async function renderTiled(engine: GLEngine, image: StoredImage | LinearImage, opts: TiledRenderOptions): Promise<{ tiles: number; tile: number; halo: number }> {
   const longEdge = Math.max(image.width, image.height);
-  const halo = opts.plain ? 0 : diffusionKernel(opts.parameters, longEdge, opts.spatial).radius;
+  const halo = opts.plain ? 0 : spatialHalo(opts.parameters, longEdge, opts.spatial);
   const tile = opts.tile ?? tileSize(engine.maxTextureSize, halo);
   if (tile + 2 * halo > engine.maxTextureSize) throw new Error(`a ${tile} px tile with its ${halo} px halo exceeds this GPU's texture size (${engine.maxTextureSize})`);
   const tiles = planTiles(image.width, image.height, tile);
@@ -62,7 +65,10 @@ export async function renderTiled(engine: GLEngine, image: StoredImage | LinearI
       }
       const window = { x: t.x - region.x, y: t.y - region.y, width: t.width, height: t.height };
       if (opts.plain) engine.renderPlain(source, opts.exposureScale, opts.output, target, window);
-      else engine.render(source, opts.parameters, { exposureScale: opts.exposureScale, spatial: opts.spatial, output: opts.output, target, longEdge, window });
+      else {
+        const glow = opts.glow ? { field: opts.glow, full: { width: image.width, height: image.height }, origin: { x: region.x, y: region.y } } : undefined;
+        engine.render(source, opts.parameters, { exposureScale: opts.exposureScale, spatial: opts.spatial, output: opts.output, target, longEdge, window, glow });
+      }
       opts.onTile(opts.float ? engine.readFloat(target, true) : engine.readBytes(target), t);
       opts.onProgress?.(i + 1, tiles.length);
       if (opts.yieldBetweenTiles !== false && i + 1 < tiles.length) await new Promise((r) => setTimeout(r, 0));

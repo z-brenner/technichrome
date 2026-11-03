@@ -1,11 +1,12 @@
-// The Technichrome engine on WebGL2: the same graph as TechnichromeEngine.swift (separate → optional dye
-// diffusion → cube → key/flare/surround → display), with the dye cube baked on the CPU by engine/printModel.ts.
+// The Technichrome engine on WebGL2: the same graph as TechnichromeEngine.swift (optional halation glow →
+// separate → optional dye diffusion and misregistration → cube → key/flare/surround → display), with the dye
+// cube baked on the CPU by engine/printModel.ts.
 
 import { CharacteristicCurve } from '../engine/curve';
 import { type EngineParameters, matrixCurve } from '../engine/parameters';
 import { type DyeLUT, buildLUT } from '../engine/printModel';
 import { P3_TO_SRGB, SRGB_TO_P3, mat3 } from '../engine/spectral';
-import { BLUR_FRAG, PLAIN_FRAG, PRINT_FRAG, SEPARATE_FRAG, VERTEX } from './shaders';
+import { BLUR_FRAG, GLOW_FRAG, PLAIN_FRAG, PRINT_FRAG, SEPARATE_FRAG, VERTEX } from './shaders';
 
 export type OutputMode = 'sRGB' | 'displayP3' | 'linearP3';
 export type DyeMask = [number, number, number];
@@ -22,6 +23,13 @@ export interface GLSource {
 /** A rectangle of a source texture in its pixels, from the top left. */
 export interface SourceWindow { x: number; y: number; width: number; height: number }
 
+/** The halation glow of a whole image: a small blurred copy of its highlight excess, owned by whoever built it. */
+export interface GlowField { texture: WebGLTexture; framebuffer: WebGLFramebuffer; width: number; height: number }
+
+/** How a render samples a glow field: the field, the size of the whole image it describes, and where the source
+ *  being rendered sits in that image (its top-left corner, in pixels from the top left). */
+export interface GlowSample { field: GlowField; full: { width: number; height: number }; origin: { x: number; y: number } }
+
 export interface RenderOptions {
   exposureScale: number;
   /** Run the spatial stage (dye diffusion). */
@@ -34,6 +42,9 @@ export interface RenderOptions {
   longEdge?: number;
   /** The part of the source to print (default: all of it). The target should have the window's size. */
   window?: SourceWindow;
+  /** The halation glow (built by `buildGlow` from the whole image's preview); without it no glow is added even
+   *  when the parameters ask for one. Ignored when `spatial` is false, as the app ignores bloom there. */
+  glow?: GlowSample;
 }
 
 /** The dye-diffusion kernel for an image of this long edge: σ in pixels and the radius the blur actually runs
@@ -43,6 +54,29 @@ export function diffusionKernel(p: EngineParameters, longEdge: number, spatial: 
   const sigmaPx = spatial ? p.diffusionSigmaAt4K * longEdge / 4000 : 0;
   if (!(sigmaPx > 0.15)) return { sigmaPx: 0, radius: 0 };
   return { sigmaPx, radius: Math.min(32, Math.ceil(sigmaPx * 3)) };
+}
+
+/** The misregistration shift in pixels for an image of this long edge (0 when skipped: the app skips below 0.05 px). */
+export function misregistrationShift(p: EngineParameters, longEdge: number, spatial: boolean): number {
+  const shift = spatial ? p.misregistrationAt4K * longEdge / 4000 : 0;
+  return shift > 0.05 ? shift : 0;
+}
+
+/** What a tile or crop needs around it, on each side, to print exactly like the whole image: the diffusion radius
+ *  plus the reach of the misregistration (the shift, its bilinear neighbour, rounded up). */
+export function spatialHalo(p: EngineParameters, longEdge: number, spatial: boolean): number {
+  const shift = misregistrationShift(p, longEdge, spatial);
+  return diffusionKernel(p, longEdge, spatial).radius + (shift > 0 ? Math.ceil(shift) + 1 : 0);
+}
+
+/** The halation glow's geometry for a preview of this long edge: σ in preview pixels (as the app: at least 1 px,
+ *  else the radius percentage of the long edge), the reduction factor the glow is computed at, and the blur that
+ *  then runs on the reduced image. */
+export function glowKernel(p: EngineParameters, longEdge: number): { sigmaPx: number; factor: number; sigma: number; radius: number } {
+  const sigmaPx = Math.max(1, p.bloomRadiusPercent / 100 * longEdge);
+  const factor = Math.min(64, Math.max(1, Math.ceil(sigmaPx / 8)));
+  const sigma = sigmaPx / factor;
+  return { sigmaPx, factor, sigma, radius: Math.min(32, Math.ceil(sigma * 3)) };
 }
 
 interface Program { program: WebGLProgram; uniforms: Record<string, WebGLUniformLocation | null> }
@@ -60,6 +94,9 @@ export class GLEngine {
   private readonly blur: Program;
   private readonly print: Program;
   private readonly plain: Program;
+  private readonly glowProgram: Program;
+  /** A 1×1 black field bound where a glow sampler must have a texture but no glow is wanted. */
+  private readonly noGlow: GlowField;
   private readonly vao: WebGLVertexArrayObject;
   private cubeTexture: WebGLTexture | null = null;
   private cubeDimension = 0;
@@ -85,13 +122,15 @@ export class GLEngine {
       }
     } catch { p3 = false; }
     this.supportsP3Canvas = p3;
-    this.separate = this.compile(SEPARATE_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uSepR', 'uSepG', 'uSepB', 'uNeg', 'uNegShape', 'uMat', 'uDyeDMax', 'uDyeGain', 'uDyeLight', 'uDyeMask']);
+    this.separate = this.compile(SEPARATE_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uSepR', 'uSepG', 'uSepB', 'uNeg', 'uNegShape', 'uMat', 'uDyeDMax', 'uDyeGain', 'uDyeLight', 'uDyeMask', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
     this.blur = this.compile(BLUR_FRAG, ['uImage', 'uAxis', 'uWeights', 'uRadius']);
-    this.print = this.compile(PRINT_FRAG, ['uDensities', 'uSource', 'uCube', 'uCubeDim', 'uEncoded', 'uExposureScale', 'uSepG', 'uNeg', 'uNegShape', 'uKey', 'uKeyNu', 'uSurround', 'uFlare', 'uOutput', 'uP3ToSRGB', 'uUVOrigin', 'uUVScale', 'uWindowOrigin']);
+    this.print = this.compile(PRINT_FRAG, ['uDensities', 'uSource', 'uCube', 'uCubeDim', 'uEncoded', 'uExposureScale', 'uSepG', 'uNeg', 'uNegShape', 'uKey', 'uKeyNu', 'uSurround', 'uFlare', 'uOutput', 'uP3ToSRGB', 'uUVOrigin', 'uUVScale', 'uWindowOrigin', 'uShift', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
     this.plain = this.compile(PLAIN_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uOutput', 'uSRGBToP3', 'uUVOrigin', 'uUVScale']);
+    this.glowProgram = this.compile(GLOW_FRAG, ['uSource', 'uEncoded', 'uThreshold', 'uFactor']);
     const vao = gl.createVertexArray();
     if (!vao) throw new Error('could not create a vertex array');
     this.vao = vao;
+    this.noGlow = this.createHalfTarget(1, 1);   // a fresh texture is zero: black, no glow
   }
 
   private compile(fragment: string, uniformNames: string[]): Program {
@@ -218,6 +257,72 @@ export class GLEngine {
     this.gl.deleteTexture(t.texture);
   }
 
+  /** A half-float target that can be sampled bilinearly (RGBA16F filtering is core WebGL2; RGBA32F's is not). */
+  private createHalfTarget(width: number, height: number): GlowField {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    const framebuffer = gl.createFramebuffer();
+    if (!texture || !framebuffer) throw new Error('could not create a render target');
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+    this.texParams(gl.LINEAR);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { texture, framebuffer, width, height };
+  }
+
+  // MARK: halation
+
+  /** The halation glow of an image from its preview (`source`, a few thousand pixels across at most): the highlight
+   *  excess above the threshold, reduced so that the blur's σ is at most 8 texels, then blurred. The result is in
+   *  the image's normalised coordinates, so the preview, a 1:1 crop and an export tile all sample the same field,
+   *  with σ following the long edge as the app's does. The field is reused when `existing` has the right size. */
+  buildGlow(source: GLSource, p: EngineParameters, existing?: GlowField | null): GlowField {
+    const gl = this.gl;
+    const { factor, sigma, radius } = glowKernel(p, Math.max(source.width, source.height));
+    const w = Math.ceil(source.width / factor), h = Math.ceil(source.height / factor);
+    let field = existing ?? null;
+    if (field && (field.width !== w || field.height !== h)) { this.deleteGlow(field); field = null; }
+    if (!field) field = this.createHalfTarget(w, h);
+    const excess = this.scratch(3, w, h);
+    this.bindTarget(excess.fb, w, h);
+    gl.useProgram(this.glowProgram.program);
+    const u = this.glowProgram.uniforms;
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, source.texture); gl.uniform1i(u.uSource, 0);
+    gl.uniform1i(u.uEncoded, source.encoded ? 1 : 0);
+    gl.uniform1f(u.uThreshold, p.bloomThreshold);
+    gl.uniform1i(u.uFactor, factor);
+    this.draw('glow');
+    this.gaussianBlur(excess.tex, w, h, sigma, radius, 4, field.framebuffer);
+    return field;
+  }
+
+  deleteGlow(field: GlowField | null | undefined) { if (field) this.deleteTarget(field); }
+
+  /** A separable Gaussian of `input` (w × h texels) with the given σ and radius (≤ 32), through scratch target
+   *  `tmpIndex`, into `out`, a framebuffer of the same size. Edges repeat, like CI's clampedToExtent. */
+  private gaussianBlur(input: WebGLTexture, w: number, h: number, sigma: number, radius: number, tmpIndex: number, out: WebGLFramebuffer) {
+    const gl = this.gl;
+    const weights = new Float32Array(33);
+    let sum = 0;
+    for (let i = 0; i <= radius; i++) { weights[i] = Math.exp(-0.5 * (i * i) / (sigma * sigma)); sum += i === 0 ? weights[i] : 2 * weights[i]; }
+    for (let i = 0; i <= radius; i++) weights[i] /= sum;
+    const tmp = this.scratch(tmpIndex, w, h);
+    gl.useProgram(this.blur.program);
+    const b = this.blur.uniforms;
+    gl.uniform1fv(b.uWeights, weights);
+    gl.uniform1i(b.uRadius, radius);
+    this.bindTarget(tmp.fb, w, h);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, input); gl.uniform1i(b.uImage, 0);
+    gl.uniform2i(b.uAxis, 1, 0);
+    this.draw('blur x');
+    this.bindTarget(out, w, h);
+    gl.bindTexture(gl.TEXTURE_2D, tmp.tex);
+    gl.uniform2i(b.uAxis, 0, 1);
+    this.draw('blur y');
+  }
+
   /** Frees the scratch targets (after a tiled export, so the GPU memory is not kept at the tile size). */
   releaseScratch() {
     for (const s of this.ping) { if (s) { this.gl.deleteTexture(s.tex); this.gl.deleteFramebuffer(s.fb); } }
@@ -301,31 +406,25 @@ export class GLEngine {
     gl.uniform3fv(u.uDyeGain, p.dyeGain);
     gl.uniform3f(u.uDyeLight, p.dyeLightEV[0] * l10, p.dyeLightEV[1] * l10, p.dyeLightEV[2] * l10);
     gl.uniform3fv(u.uDyeMask, opts.dyeMask ?? DYE_ALL);
+    // Halation: the glow field, where this source sits in the whole image (GL texels: y from the bottom), the image's size.
+    const glow = opts.spatial && opts.glow && p.bloomAmount > 0 ? opts.glow : null;
+    const bloomAmount = glow ? p.bloomAmount : 0;
+    const glowOrigin: [number, number] = glow ? [glow.origin.x, glow.full.height - glow.origin.y - sh] : [0, 0];
+    const glowFull: [number, number] = glow ? [glow.full.width, glow.full.height] : [sw, sh];
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, (glow ?? { field: this.noGlow }).field.texture); gl.uniform1i(u.uGlow, 1);
+    gl.uniform1f(u.uBloomAmount, bloomAmount);
+    gl.uniform2i(u.uGlowOrigin, glowOrigin[0], glowOrigin[1]);
+    gl.uniform2f(u.uGlowFull, glowFull[0], glowFull[1]);
     this.draw('separate');
 
     // Pass 2 (optional): dye diffusion in the gelatin, a separable Gaussian on the densities. The key stays sharp.
     // σ follows the whole image's long edge (a tile or a crop of a larger image blurs like the whole).
     let densities = dens.tex;
-    const { sigmaPx, radius } = diffusionKernel(p, opts.longEdge ?? Math.max(sw, sh), opts.spatial);
+    const longEdge = opts.longEdge ?? Math.max(sw, sh);
+    const { sigmaPx, radius } = diffusionKernel(p, longEdge, opts.spatial);
     if (radius > 0) {
-      const weights = new Float32Array(33);
-      let sum = 0;
-      for (let i = 0; i <= radius; i++) { weights[i] = Math.exp(-0.5 * (i * i) / (sigmaPx * sigmaPx)); sum += i === 0 ? weights[i] : 2 * weights[i]; }
-      for (let i = 0; i <= radius; i++) weights[i] /= sum;
-      const tmp = this.scratch(1, sw, sh);
       const out = this.scratch(2, sw, sh);
-      gl.useProgram(this.blur.program);
-      const b = this.blur.uniforms;
-      gl.uniform1fv(b.uWeights, weights);
-      gl.uniform1i(b.uRadius, radius);
-      this.bindTarget(tmp.fb, sw, sh);
-      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, dens.tex); gl.uniform1i(b.uImage, 0);
-      gl.uniform2i(b.uAxis, 1, 0);
-      this.draw('blur x');
-      this.bindTarget(out.fb, sw, sh);
-      gl.bindTexture(gl.TEXTURE_2D, tmp.tex);
-      gl.uniform2i(b.uAxis, 0, 1);
-      this.draw('blur y');
+      this.gaussianBlur(dens.tex, sw, sh, sigmaPx, radius, 1, out.fb);
       densities = out.tex;
     }
 
@@ -352,6 +451,12 @@ export class GLEngine {
     gl.uniform2f(q.uUVOrigin, ox, oy);
     gl.uniform2f(q.uUVScale, sx, sy);
     gl.uniform2i(q.uWindowOrigin, opts.window ? opts.window.x : 0, opts.window ? sh - opts.window.y - opts.window.height : 0);
+    // Misregistration (the dyes pulled apart in the print pass; the key stays registered) and the glow for the key.
+    gl.uniform1f(q.uShift, misregistrationShift(p, longEdge, opts.spatial));
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, (glow ?? { field: this.noGlow }).field.texture); gl.uniform1i(q.uGlow, 3);
+    gl.uniform1f(q.uBloomAmount, bloomAmount);
+    gl.uniform2i(q.uGlowOrigin, glowOrigin[0], glowOrigin[1]);
+    gl.uniform2f(q.uGlowFull, glowFull[0], glowFull[1]);
     this.draw('print');
     gl.activeTexture(gl.TEXTURE0);
   }

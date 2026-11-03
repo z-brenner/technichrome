@@ -31,11 +31,13 @@ tuned on), or a whole folder of them as a set, or use the camera (labelled *not 
 expose sensor data). See the print; hold for the plain decode; double-tap for a 1:1 loupe of the full
 decode and drag it around; hold C for the camera's own JPEG of the same capture (Apple's rendering, for a
 ProRAW); pin a look as A and hold A to compare; read the histogram and clipping figures; adjust everything
-in the Laboratory; copy a look as a link that opens on a phone; save a full-resolution JPEG or the whole
-set as a zip with the look's JSON. The per-pixel maths is a port of the Swift core tested against the same
-Python fixture (1.6e-8), the WebGL shaders are checked against it in headless Chromium in CI (1.2e-4), and
-the tiled full-resolution export is checked bitwise against a whole-image render. Nothing is uploaded. See
-`web/README.md` for running it locally and for push-to-deploy on Cloudflare Pages.
+in the Laboratory, the spatial stages included (dye diffusion, halation, misregistration); copy a look as a
+link that opens on a phone; save a full-resolution JPEG or the whole set as a zip with the look's JSON. The
+per-pixel maths is a port of the Swift core tested against the same Python fixture (1.6e-8), the WebGL
+shaders are checked against it in headless Chromium in CI (1.2e-4), the halation glow against a CPU
+reference, and the tiled full-resolution export is checked bitwise against a whole-image render, spatial
+stages on. Nothing is uploaded. See `web/README.md` for running it locally and for push-to-deploy on
+Cloudflare Pages.
 
 ## Repository layout
 

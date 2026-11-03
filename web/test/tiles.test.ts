@@ -3,8 +3,9 @@
 import { describe, expect, it } from 'vitest';
 import { planTiles, tileSize } from '../src/gl/tiled';
 import { LIBRAW16_TO_LINEAR, SRGB8_TO_LINEAR, type StoredImage, downsample, linearRegion, isOpenable } from '../src/raw/decoder';
-import { diffusionKernel } from '../src/gl/engine';
+import { diffusionKernel, glowKernel, misregistrationShift, spatialHalo } from '../src/gl/engine';
 import { TECHNICHROME_V1 } from '../src/engine/parameters';
+import { LOUPE_HALO } from '../src/ui/loupe';
 
 function stored(width: number, height: number): StoredImage {
   const samples = new Uint16Array(width * height * 3);
@@ -38,6 +39,23 @@ describe('tile planning', () => {
     expect(diffusionKernel(TECHNICHROME_V1, 4000, false)).toEqual({ sigmaPx: 0, radius: 0 });
     expect(diffusionKernel({ ...TECHNICHROME_V1, diffusionSigmaAt4K: 0.1 }, 4000, true).radius).toBe(0);   // below the 0.15 px threshold
     expect(diffusionKernel({ ...TECHNICHROME_V1, diffusionSigmaAt4K: 40 }, 4000, true).radius).toBe(32);   // capped like the shader loop
+  });
+
+  it('adds the misregistration reach to the halo and skips the shifts the app skips', () => {
+    expect(misregistrationShift({ ...TECHNICHROME_V1, misregistrationAt4K: 1 }, 8000, true)).toBe(2);
+    expect(misregistrationShift({ ...TECHNICHROME_V1, misregistrationAt4K: 0.04 }, 4000, true)).toBe(0);   // below the app's 0.05 px
+    expect(misregistrationShift({ ...TECHNICHROME_V1, misregistrationAt4K: 1 }, 4000, false)).toBe(0);    // no spatial stages
+    const blurRadius = Math.ceil(TECHNICHROME_V1.diffusionSigmaAt4K * 3);
+    expect(spatialHalo(TECHNICHROME_V1, 4000, true)).toBe(blurRadius);
+    expect(spatialHalo({ ...TECHNICHROME_V1, misregistrationAt4K: 1.5 }, 4000, true)).toBe(blurRadius + 3);   // 1.5 px: its neighbour, rounded up
+    // The loupe's fixed halo covers every slider position up to a 16,000 px long edge.
+    expect(spatialHalo({ ...TECHNICHROME_V1, diffusionSigmaAt4K: 4, misregistrationAt4K: 3 }, 16000, true)).toBeLessThanOrEqual(LOUPE_HALO);
+  });
+
+  it('reduces the glow so that its blur stays small, and never blurs below a pixel', () => {
+    expect(glowKernel({ ...TECHNICHROME_V1, bloomRadiusPercent: 1.5 }, 1600)).toEqual({ sigmaPx: 24, factor: 3, sigma: 8, radius: 24 });
+    expect(glowKernel({ ...TECHNICHROME_V1, bloomRadiusPercent: 0.2 }, 320)).toEqual({ sigmaPx: 1, factor: 1, sigma: 1, radius: 3 });
+    expect(glowKernel({ ...TECHNICHROME_V1, bloomRadiusPercent: 5 }, 1600).factor).toBe(10);
   });
 });
 

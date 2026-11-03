@@ -202,7 +202,7 @@ const server = http.createServer((req, res) => {
     await page.setViewportSize({ width: original.width, height: 1000 });
     await page.waitForTimeout(400);
     const tallSheet = await page.locator('#lab').boundingBox();
-    const exposureTitle = page.locator('#labBody .section', { hasText: 'Exposure' }).locator('.section-title');
+    const exposureTitle = page.locator('#labBody .section-title', { hasText: /^Exposure$/ });   // a section's title, not a note that mentions exposure
     await exposureTitle.click();
     // The observer's callback comes with the next frame, which the software GPU can be slow to reach: poll, do not sleep.
     const roomOf = () => page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); return { overlap: s.bottom - l.top, pad: parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom) }; });
@@ -280,6 +280,23 @@ const server = http.createServer((req, res) => {
   await page.waitForFunction(() => /highlights clipped \S+% · shadows crushed \S+%/.test(document.getElementById('readoutText').textContent), null, { timeout: 8000 }).then(() => true, () => false).then((ok) => check(ok, `the readout shows clipping figures (got "${''}")`));
   console.log(`readout: ${await page.textContent('#readoutText')}`);
   check((await page.evaluate(() => { const c = document.getElementById('histogram'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let lit = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++; return lit; })) > 200, 'the histogram canvas has been drawn');
+  // Halation on (with the threshold at its lowest, so any photograph glows): the Spatial section opens, the glow is
+  // built from the preview and the print changes (the canvas keeps its drawing buffer, so it can be compared); the
+  // page must stay free of errors, which the end of the run checks. Then both back to the shipped look.
+  const spatial = page.locator('#labBody .section', { has: page.locator('.section-title', { hasText: /^Spatial$/ }) });
+  await spatial.locator('.section-title').click();
+  const sliderTitles = await spatial.locator('.row-head').allTextContents();
+  check(sliderTitles[2].includes('Halation') && sliderTitles[3].includes('threshold'), `the spatial sliders are in the app's order (got ${sliderTitles.join(' / ')})`);
+  const halation = spatial.locator('input[type=range]').nth(2), threshold = spatial.locator('input[type=range]').nth(3);
+  const printBefore = await page.evaluate(() => document.getElementById('view').toDataURL());
+  await threshold.fill('0.3');
+  await halation.fill('0.3');
+  await page.waitForFunction((before) => document.getElementById('view').toDataURL() !== before, printBefore, { timeout: 10000, polling: 500 }).then(() => true, () => false).then((ok) => check(ok, 'the print changes when halation is added'));
+  console.log(`readout with halation: ${await page.textContent('#readoutText')}`);
+  await page.screenshot({ path: out.replace(/\.png$/, '-halation.png'), fullPage: false });
+  await halation.fill('0');
+  await threshold.fill('0.85');
+  await spatial.locator('.section-title').click();
   // Help: ? opens it, Escape closes it.
   await page.keyboard.press('?');
   check(!(await page.isHidden('#help')), '? opens the help');

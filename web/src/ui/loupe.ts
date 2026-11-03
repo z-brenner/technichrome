@@ -4,8 +4,9 @@
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Size { width: number; height: number }
 
-/** The widest halo the dye-diffusion blur can need (the engine caps its radius at 32 texels). */
-export const LOUPE_HALO = 32;
+/** The widest halo the spatial stages can need: the dye-diffusion blur (the engine caps its radius at 32 texels)
+ *  plus the misregistration's reach (3 px at 4K is 13 texels at a 16,000 px long edge; see `spatialHalo`). */
+export const LOUPE_HALO = 48;
 /** Extra image uploaded around the crop so that a drag mostly moves the window inside the same texture. */
 export const LOUPE_MARGIN = 128;
 /** What a region adds to the crop on each side; the crop must leave this much of the GPU's texture limit. */

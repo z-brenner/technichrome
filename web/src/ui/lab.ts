@@ -85,6 +85,13 @@ const SECTIONS: { title: string; sliders: SliderSpec[]; extra?: (state: LabState
     title: 'Spatial',
     sliders: [
       { title: 'Dye diffusion (px @ 4K)', min: 0, max: 4, step: 0.05, format: (v) => `${v.toFixed(2)} px`, get: (s) => s.parameters.diffusionSigmaAt4K, set: (s, v) => { s.parameters.diffusionSigmaAt4K = v; } },
+      { title: 'Misregistration (px @ 4K)', min: 0, max: 3, step: 0.05, format: (v) => `${v.toFixed(2)} px`, get: (s) => s.parameters.misregistrationAt4K, set: (s, v) => { s.parameters.misregistrationAt4K = v; },
+        note: 'The three dyes pulled apart at 120°, the key image kept in register: a fault of the period, off in the shipped look.' },
+      { title: 'Halation', min: 0, max: 0.5, step: 0.005, format: (v) => v.toFixed(3), get: (s) => s.parameters.bloomAmount, set: (s, v) => { s.parameters.bloomAmount = v; },
+        note: 'Glow from highlights above the threshold, added to the scene before the separation negatives and the key. Off in the shipped look.' },
+      { title: 'Halation threshold', min: 0.3, max: 1.5, step: 0.01, format: f2, get: (s) => s.parameters.bloomThreshold, set: (s, v) => { s.parameters.bloomThreshold = v; },
+        note: "In the file's own linear units, before exposure and timing, as in the app." },
+      { title: 'Halation radius (% of edge)', min: 0.2, max: 5, step: 0.1, format: (v) => `${v.toFixed(1)} %`, get: (s) => s.parameters.bloomRadiusPercent, set: (s, v) => { s.parameters.bloomRadiusPercent = v; } },
     ],
   },
 ];
