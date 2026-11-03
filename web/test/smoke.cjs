@@ -54,6 +54,14 @@ const server = http.createServer((req, res) => {
   if (inputs.length > 1) {
     check(!(await page.isHidden('#queueNav')), 'the set navigation is shown for several files');
     check((await page.textContent('#counter')).trim() === `1 / ${inputs.length}`, 'the counter starts at 1');
+    // Racing a decode: forward to the uncached second file (its decode starts) and straight back to the cached
+    // first one. The overlay must clear at once and the first photograph show again.
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(60);
+    await page.keyboard.press('ArrowLeft');
+    try {
+      await page.waitForFunction(() => document.getElementById('busy').hidden && document.getElementById('counter').textContent.trim().startsWith('1 /'), null, { timeout: 5000 });
+    } catch { check(false, 'returning to a cached photograph during a decode clears the busy overlay'); }
     const t1 = Date.now();
     await page.keyboard.press('ArrowRight');
     await page.waitForFunction((n) => document.getElementById('counter').textContent.trim() === `2 / ${n}` && document.getElementById('busy').hidden, inputs.length, { timeout: 120000 });
