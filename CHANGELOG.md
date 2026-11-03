@@ -3,6 +3,10 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 15 — the phone layout (#16)
+- On narrow screens the Laboratory is a sheet over the lower part of the screen (the picture stays visible), the header is compact, the hints are short and say nothing about keys on touch devices.
+- `MOBILE=1 node test/smoke.cjs` runs the smoke test as an iPhone: touch double-tap for the loupe, 1:1 in device pixels, the sheet's position.
+
 ## Round 14 — drag the loupe, save the set (#15)
 - Drag inside the loupe to move the crop; the image around it is uploaded with a margin so most drags only move the window.
 - *Save all*: every photograph of the set developed with the look being shown, each with its own print timing, downloaded as one zip with the look's JSON; Escape stops it; undecodable files are skipped and named.
