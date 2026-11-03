@@ -85,6 +85,9 @@ let cameraFrameTexture: GLSource | null = null;
 let cameraHeld = false;       // what the user asks for
 let showingCamera = false;    // what is on screen (follows cameraHeld once the JPEG is decoded)
 const cameraScratch = document.createElement('canvas');
+// On a P3 canvas the scratch context is P3 too, so a Display P3 JPEG (an iPhone's) keeps its colours; the frame is then
+// shown as it is, with no sRGB→P3 conversion, because its encoding already matches the drawing buffer.
+let cameraScratchContext: CanvasRenderingContext2D | null = null;
 
 /** The loupe: a crop of the full decode shown 1:1 in device pixels, from a region uploaded with halo and margin. */
 let loupe: { crop: Rect; region: Rect; texture: GLSource } | null = null;
@@ -198,7 +201,8 @@ function fitCanvas(width: number, height: number, oneToOne = false) {
 /** Draws the camera's JPEG (whole, scaled to the preview, or the loupe's crop at 1:1) into the canvas, colour-managed. */
 function renderCameraRendering(bitmap: ImageBitmap) {
   if (!source) return;
-  const ctx = cameraScratch.getContext('2d');
+  cameraScratchContext ??= cameraScratch.getContext('2d', output === 'displayP3' ? ({ colorSpace: 'display-p3' } as CanvasRenderingContext2DSettings) : undefined);
+  const ctx = cameraScratchContext;
   if (!ctx) return;
   if (loupe) {
     const sx = bitmap.width / source.full.width, sy = bitmap.height / source.full.height;
@@ -209,7 +213,7 @@ function renderCameraRendering(bitmap: ImageBitmap) {
     ctx.drawImage(bitmap, 0, 0, view.width, view.height);
   }
   cameraFrameTexture = engine.uploadFrame(cameraScratch, cameraScratch.width, cameraScratch.height, cameraFrameTexture ?? undefined);
-  engine.renderPlain(cameraFrameTexture, 1, output);   // sRGB-encoded as decoded by the browser; converted for a P3 canvas
+  engine.renderPlain(cameraFrameTexture, 1, 'sRGB');   // pass-through: the scratch canvas already matches the drawing buffer's colour space
 }
 
 function renderStill() {
