@@ -144,7 +144,8 @@ const server = http.createServer((req, res) => {
     const viewBox = await page.locator('#view').boundingBox();
     const vh = page.viewportSize().height;
     check(labBox.y + labBox.height >= vh - 1 && labBox.height <= vh * 0.65 && viewBox.y + viewBox.height <= labBox.y + 1, `the Laboratory sheet sits at the bottom (top ${labBox.y.toFixed(0)} of ${vh}) with the whole picture above it (bottom ${(viewBox.y + viewBox.height).toFixed(0)})`);
-    // The same with a wide photograph, which the sheet used to cover almost entirely.
+    // The same with a wide photograph, which the sheet used to cover almost entirely (needs a second file).
+    if (inputs.length > 1) {
     await page.keyboard.press('Escape');
     await page.click('#nextButton');
     await page.waitForFunction(() => document.getElementById('busy').hidden && document.getElementById('counter').textContent.trim().startsWith('2 /'), null, { timeout: 120000 });
@@ -158,6 +159,7 @@ const server = http.createServer((req, res) => {
     await page.click('#prevButton');
     await page.waitForFunction(() => document.getElementById('busy').hidden && document.getElementById('counter').textContent.trim().startsWith('1 /'), null, { timeout: 120000 });
     await page.click('#labButton');
+    }
     await page.screenshot({ path: out.replace(/\.png$/, '-lab.png'), fullPage: false });
   }
   await page.click('#pinButton');
