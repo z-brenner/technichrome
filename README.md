@@ -27,7 +27,8 @@ Everything runs on the phone. No accounts, no network, no presets — one meticu
 
 `web/` is the same engine in a browser tab, for testing the processing before the app reaches a phone:
 open a DNG (decoded on the device with LibRaw compiled to WebAssembly, using the settings the look was
-tuned on), or use the camera (labelled *not RAW*: browsers do not expose sensor data), see the print,
+tuned on), or a whole folder of them, or use the camera (labelled *not RAW*: browsers do not expose sensor
+data), see the print, double-tap for a 1:1 loupe of the full decode, pin a look and hold A to compare it,
 hold to compare, adjust everything in the Laboratory, save a JPEG. The per-pixel maths is a port of the
 Swift core tested against the same Python fixture (1.6e-8), and the WebGL shaders are checked against it
 in headless Chromium in CI (1.2e-4). Nothing is uploaded. See `web/README.md` for running it locally and

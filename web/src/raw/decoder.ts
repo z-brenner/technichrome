@@ -5,6 +5,10 @@
 //     to 0.02 % on the sample DNGs;
 //   • any other image the browser can decode (JPEG, PNG, HEIC on Safari), linearised from its sRGB encoding:
 //     display-referred data, like the HEIF fallback of a capture, and labelled as such.
+// The full-resolution decode is kept as the decoder produced it (16-bit LibRaw output, 8-bit sRGB) together with
+// the table that maps a sample code to scene-linear, and linearised region by region when the engine needs it:
+// half (RAW) to a quarter (JPEG) of the memory of keeping floats, which is what a 48-megapixel ProRAW needs to
+// open on a phone. The interactive preview is a small float copy.
 
 import { librawGammaDecode, srgbDecode } from '../engine/spectral';
 
@@ -17,9 +21,28 @@ export interface LinearImage {
   rgb: Float32Array;
 }
 
+/** An image as its decoder produced it: 3 integer samples per pixel, row 0 at the top, and the table that linearises them. */
+export interface StoredImage {
+  width: number;
+  height: number;
+  samples: Uint16Array | Uint8ClampedArray | Uint8Array;
+  /** Scene-linear value of every sample code (65536 entries for 16-bit data, 256 for 8-bit). */
+  toLinear: Float32Array;
+}
+
+/** A linearised rectangle of an image, with the rectangle actually delivered (requests are clamped to the image). */
+export interface Region {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** 3 floats per pixel, row 0 at the top. */
+  rgb: Float32Array;
+}
+
 export interface DecodedSource {
   kind: SourceKind;
-  /** What to call it: "Bayer RAW", "Linear DNG", "Not RAW". */
+  /** What to call it: "Bayer RAW", "Apple ProRAW", "Linear DNG", "Not RAW". */
   label: string;
   fileName: string;
   cameraModel?: string;
@@ -27,19 +50,22 @@ export interface DecodedSource {
   shutter?: number;
   /** DNG BaselineExposure in stops (0 when absent), applied by the engine like the app does. */
   baselineEV: number;
-  full: LinearImage;
-  /** A box-downsampled copy for interactive work (long edge ≤ previewLongEdge). */
+  /** The full decode; `linearRegion` linearises any part of it. */
+  full: StoredImage;
+  /** A box-downsampled linear copy for interactive work (long edge ≤ PREVIEW_LONG_EDGE). */
   preview: LinearImage;
   decodeMs: number;
 }
 
-const ENCODED_TO_LINEAR = (() => {
+/** LibRaw's 16-bit output codes → scene-linear (its BT.709 output curve, inverted exactly). */
+export const LIBRAW16_TO_LINEAR = (() => {
   const t = new Float32Array(65536);
   for (let i = 0; i < 65536; i++) t[i] = librawGammaDecode(i / 65535);
   return t;
 })();
 
-const SRGB8_TO_LINEAR = (() => {
+/** 8-bit sRGB codes → linear. */
+export const SRGB8_TO_LINEAR = (() => {
   const t = new Float32Array(256);
   for (let i = 0; i < 256; i++) t[i] = srgbDecode(i / 255);
   return t;
@@ -47,19 +73,55 @@ const SRGB8_TO_LINEAR = (() => {
 
 export const PREVIEW_LONG_EDGE = 1600;
 
+/** Bytes held by a decoded source (its full decode and its preview). */
+export function sourceBytes(s: DecodedSource): number {
+  return s.full.samples.byteLength + s.preview.rgb.byteLength;
+}
+
+/** Scene-linear floats for the rectangle (x, y, w, h) of `img`, clamped to the image; the result says which rectangle it holds. */
+export function linearRegion(img: StoredImage | LinearImage, x: number, y: number, w: number, h: number): Region {
+  const x0 = Math.max(0, Math.min(img.width, Math.floor(x)));
+  const y0 = Math.max(0, Math.min(img.height, Math.floor(y)));
+  const x1 = Math.max(x0, Math.min(img.width, Math.floor(x + w)));
+  const y1 = Math.max(y0, Math.min(img.height, Math.floor(y + h)));
+  const width = x1 - x0, height = y1 - y0;
+  const rgb = new Float32Array(width * height * 3);
+  if ('rgb' in img) {
+    for (let row = 0; row < height; row++) {
+      const start = ((y0 + row) * img.width + x0) * 3;
+      rgb.set(img.rgb.subarray(start, start + width * 3), row * width * 3);
+    }
+  } else {
+    const { samples, toLinear } = img;
+    for (let row = 0; row < height; row++) {
+      let i = ((y0 + row) * img.width + x0) * 3;
+      let o = row * width * 3;
+      for (let col = 0; col < width * 3; col++) rgb[o++] = toLinear[samples[i++]];
+    }
+  }
+  return { x: x0, y: y0, width, height, rgb };
+}
+
 /** Box-filter downsample in linear light to a long edge of at most `maxEdge` (integer factor). */
-export function downsample(img: LinearImage, maxEdge = PREVIEW_LONG_EDGE): LinearImage {
+export function downsample(img: StoredImage | LinearImage, maxEdge = PREVIEW_LONG_EDGE): LinearImage {
   const factor = Math.max(1, Math.ceil(Math.max(img.width, img.height) / maxEdge));
-  if (factor === 1) return img;
+  if (factor === 1) {
+    if ('rgb' in img) return img;
+    const whole = linearRegion(img, 0, 0, img.width, img.height);
+    return { width: whole.width, height: whole.height, rgb: whole.rgb };
+  }
   const w = Math.floor(img.width / factor), h = Math.floor(img.height / factor);
   const out = new Float32Array(w * h * 3);
   const inv = 1 / (factor * factor);
+  const rowSpan = img.width * 3;
+  // One band of `factor` source rows at a time keeps the linearisation table lookups in one tight loop.
   for (let y = 0; y < h; y++) {
+    const band = linearRegion(img, 0, y * factor, img.width, factor).rgb;
     for (let x = 0; x < w; x++) {
       let r = 0, g = 0, b = 0;
       for (let dy = 0; dy < factor; dy++) {
-        let i = ((y * factor + dy) * img.width + x * factor) * 3;
-        for (let dx = 0; dx < factor; dx++) { r += img.rgb[i]; g += img.rgb[i + 1]; b += img.rgb[i + 2]; i += 3; }
+        let i = dy * rowSpan + x * factor * 3;
+        for (let dx = 0; dx < factor; dx++) { r += band[i]; g += band[i + 1]; b += band[i + 2]; i += 3; }
       }
       const o = (y * w + x) * 3;
       out[o] = r * inv; out[o + 1] = g * inv; out[o + 2] = b * inv;
@@ -75,6 +137,12 @@ function isTIFF(bytes: Bytes): boolean {
 }
 
 const RAW_EXTENSIONS = /\.(dng|cr2|cr3|nef|nrw|arw|srf|sr2|raf|orf|rw2|pef|raw|dcr|kdc|erf|mef|mos|mrw|3fr|fff|iiq|x3f|srw)$/i;
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|avif|bmp|heic|heif|tiff?)$/i;
+
+/** Whether a file name is something the page can try to open (RAW or a browser image). */
+export function isOpenable(name: string): boolean {
+  return RAW_EXTENSIONS.test(name) || IMAGE_EXTENSIONS.test(name);
+}
 
 export function looksLikeRAW(file: File, bytes: Bytes): boolean {
   return RAW_EXTENSIONS.test(file.name) || (isTIFF(bytes) && /\.(tif|tiff)$/i.test(file.name) === false);
@@ -90,11 +158,12 @@ export async function decodeRAW(file: File, bytes: Bytes): Promise<DecodedSource
     const meta = await raw.metadata(true);
     const img = await raw.imageData();
     if (!img || !(img.data instanceof Uint16Array) || img.colors !== 3) throw new Error('LibRaw returned no 16-bit RGB image for this file.');
-    const n = img.width * img.height;
-    const rgb = new Float32Array(n * 3);
-    const src = img.data;
-    for (let i = 0; i < n * 3; i++) rgb[i] = ENCODED_TO_LINEAR[src[i]];
-    const full: LinearImage = { width: img.width, height: img.height, rgb };
+    // Keep LibRaw's own 16-bit buffer as the stored image (no float copy). It arrives from the decoder's worker as
+    // its own ArrayBuffer; copy only if it were ever a view into shared WASM memory, which dispose() would free.
+    const data = img.data;
+    const own = !(data.buffer instanceof SharedArrayBuffer) && data.byteOffset === 0 && data.buffer.byteLength === data.byteLength;
+    const samples = own ? data : data.slice();
+    const full: StoredImage = { width: img.width, height: img.height, samples, toLinear: LIBRAW16_TO_LINEAR };
     const filters = typeof meta?.filters === 'number' ? meta.filters : 0;
     const kind: SourceKind = filters === 0 ? 'linearDNG' : 'bayer';
     const make = String(meta?.camera_make ?? '').trim();
@@ -132,11 +201,9 @@ export function linearFromBitmap(bitmap: ImageBitmap | HTMLVideoElement | HTMLCa
   if (!ctx) throw new Error('could not create a 2D canvas');
   ctx.drawImage(bitmap, 0, 0, width, height);
   const data = ctx.getImageData(0, 0, width, height).data;
-  const rgb = new Float32Array(width * height * 3);
-  for (let i = 0, o = 0; i < data.length; i += 4, o += 3) {
-    rgb[o] = SRGB8_TO_LINEAR[data[i]]; rgb[o + 1] = SRGB8_TO_LINEAR[data[i + 1]]; rgb[o + 2] = SRGB8_TO_LINEAR[data[i + 2]];
-  }
-  const full: LinearImage = { width, height, rgb };
+  const samples = new Uint8ClampedArray(width * height * 3);
+  for (let i = 0, o = 0; i < data.length; i += 4, o += 3) { samples[o] = data[i]; samples[o + 1] = data[i + 1]; samples[o + 2] = data[i + 2]; }
+  const full: StoredImage = { width, height, samples, toLinear: SRGB8_TO_LINEAR };
   return { kind: 'display', label: 'Not RAW', fileName: name, baselineEV: 0, full, preview: downsample(full), decodeMs: performance.now() - t0 };
 }
 
