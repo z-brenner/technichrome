@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 // The RAW decoder (libraw-wasm) is a pthreads build and needs SharedArrayBuffer, which browsers only
-// enable on cross-origin-isolated pages. vercel.json sets the same headers in production.
+// enable on cross-origin-isolated pages. public/_headers sets the same headers on Cloudflare Pages.
 const isolationHeaders = {
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',

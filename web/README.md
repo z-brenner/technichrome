@@ -45,21 +45,26 @@ npm run test:gl      # GPU parity of the built site in headless Chromium (needs 
 ```
 
 The RAW decoder is a pthreads build and needs `SharedArrayBuffer`, so the page must be
-cross-origin isolated. The dev server, `vercel.json` and the test servers all send
-`Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. Any other
-host must send the same two headers or the decoder will not start (the page says so).
+cross-origin isolated. The dev server, the test servers and `public/_headers` (which Cloudflare Pages
+applies to `dist/`) all send `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. Any other host must send the same two headers or the
+decoder will not start (the page says so). Cross-origin resources on the page (the Google Fonts
+stylesheet) carry `crossorigin` so they load under that policy.
 
-## Deploying on every push
+## Deploying on every push (Cloudflare Pages)
 
-`vercel.json` configures a static Vite site with the isolation headers. Two ways to get push-to-deploy:
+Two ways to get push-to-deploy; both end with the site on `technichrome.pages.dev` (or a custom domain).
 
-1. **Vercel's Git integration** (no secrets in GitHub): in the Vercel dashboard, *Add New → Project →
-   Import* `z-brenner/technichrome`, set **Root Directory** to `web`, keep the detected Vite settings,
-   deploy. From then on every push to `main` is a production deployment and every pull request gets a
-   preview URL.
+1. **Cloudflare's Git integration** (no secrets in GitHub): Cloudflare dashboard → *Workers & Pages →
+   Create → Pages → Connect to Git* → `z-brenner/technichrome`. Settings: production branch `main`,
+   **root directory** `web`, build command `npm run build`, build output directory `dist`. From then on
+   every push to `main` is a production deployment and every other branch gets a preview URL. The
+   `_headers` file in the output is picked up automatically.
 2. **From GitHub Actions** (`.github/workflows/deploy-web.yml`): add the repository secrets
-   `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (from a Vercel project's settings) and the
-   workflow builds and deploys `web/` on every push to `main`. Without the secrets the job skips itself.
+   `CLOUDFLARE_API_TOKEN` (a token with *Cloudflare Pages → Edit* on the account) and
+   `CLOUDFLARE_ACCOUNT_ID` (on the dashboard's Workers & Pages overview). The workflow tests, builds and
+   deploys `web/` on every push to `main`, creating the `technichrome` Pages project the first time.
+   Without the secrets the job skips itself.
 
 Output colour: the page renders in Display P3 when the browser's canvas supports it (Chrome, Safari),
 otherwise it converts the print to sRGB with the same chroma-scaling soft clip the engine uses for
