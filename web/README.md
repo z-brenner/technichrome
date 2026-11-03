@@ -58,8 +58,9 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
   size (phones cap 2D canvases around 16 megapixels) the page halves the size and says so.
 * **Save all** develops every photograph of the set with the look being shown (each with its own print
   timing, as the app would) and downloads one zip: the prints and the look as JSON (parameters plus the
-  print exposure), so a batch can be reproduced later. Escape stops it after the current file; files that
-  fail to decode are skipped and named. The zip is built in memory, so a set of fifty 12 MP prints is a
+  print exposure, which *Import JSON* restores), so a batch can be reproduced later. Escape stops it after
+  the current file; files that fail to decode are skipped and named; prints whose names would collide (a
+  RAW/JPEG pair, two folders) are numbered. The set is fixed when the batch starts. The zip is built in memory, so a set of fifty 12 MP prints is a
   few hundred megabytes before it downloads.
 * **Memory.** The full decode is kept as LibRaw produced it (16-bit codes, 6 bytes per pixel) or as
   8-bit sRGB (3 bytes), linearised through a table region by region when the engine needs it, rather

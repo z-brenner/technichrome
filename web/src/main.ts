@@ -11,7 +11,8 @@ import { type DecodedSource, type LinearImage, type StoredImage, decodeFile, dow
 import { startCamera, type CameraSession } from './ui/camera';
 import { buildLab, defaultLabState, type LabState } from './ui/lab';
 import { installParityHook } from './parity';
-import { LOUPE_MAX_EDGE, LOUPE_HALO, type Rect, place, planCrop, regionFor, regionServes } from './ui/loupe';
+import { LOUPE_MAX_EDGE, LOUPE_RESERVE, type Rect, place, planCrop, regionFor, regionServes } from './ui/loupe';
+import { uniqueName } from './ui/names';
 import { strToU8, zipSync } from 'fflate';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -295,7 +296,7 @@ function openLoupe(cssX: number, cssY: number) {
   if (!source || camera) return;
   const point = { x: cssX * view.width / Math.max(1, view.clientWidth), y: cssY * view.height / Math.max(1, view.clientHeight) };
   const dpr = window.devicePixelRatio || 1;
-  const maxEdge = Math.min(LOUPE_MAX_EDGE, engine.maxTextureSize - 2 * LOUPE_HALO);
+  const maxEdge = Math.min(LOUPE_MAX_EDGE, engine.maxTextureSize - 2 * LOUPE_RESERVE);   // the region adds halo and margin
   const crop = planCrop(source.full, source.preview, point, { width: stage.clientWidth - 32, height: stage.clientHeight - 32 }, dpr, maxEdge);
   loupe = { crop, ...uploadLoupeRegion(crop) };
   fitCanvas(crop.width, crop.height, true);
@@ -469,13 +470,14 @@ async function saveSet() {
   const L = look();
   const parameters = cloneParameters(L.parameters);
   const printEV = L.printExposureEV;
-  batch = { done: 0, total: queue.length, cancelled: false };
+  const entries = queue.slice();   // the set as it is now: opening another set meanwhile does not change this batch
+  batch = { done: 0, total: entries.length, cancelled: false };
   const files: Record<string, Uint8Array> = {};
   const skipped: string[] = [];
   const progress = (name: string, tiles?: string) => setBusy(true, `saving the set · ${batch!.done + 1} / ${batch!.total} · ${name}${tiles ? ` · ${tiles}` : ''} · Esc stops`);
   try {
-    for (let i = 0; i < queue.length && !batch.cancelled; i++) {
-      const entry = queue[i];
+    for (let i = 0; i < entries.length && !batch.cancelled; i++) {
+      const entry = entries[i];
       progress(entry.file.name, 'decoding');
       let src = entry.source;
       if (!src) {
@@ -488,10 +490,13 @@ async function saveSet() {
       const lookFor: Look = { parameters, printExposureEV: printEV, timingEV: measureTiming(src, parameters) };
       try {
         const print = await developPrint(src, lookFor, (done, total) => progress(entry.file.name, `${done} / ${total}`));
-        files[printName(src, lookFor)] = new Uint8Array(await print.blob.arrayBuffer());
+        // A RAW/JPEG pair or two folders can share a name: every print keeps its own entry.
+        const name = uniqueName(printName(src, lookFor).replace(/\.jpg$/, ''), '.jpg', (n) => n in files);
+        files[name] = new Uint8Array(await print.blob.arrayBuffer());
       } catch (e) {
         skipped.push(`${entry.file.name}: ${(e as Error).message}`);
       }
+      if (!queue.includes(entry) && entry.source !== source) delete entry.source;   // no longer in the set shown: do not keep its decode
       batch.done++;
       info.innerHTML = describe();
     }
@@ -553,8 +558,10 @@ $<HTMLButtonElement>('resetButton').addEventListener('click', () => {
   remeasure();
   scheduleRender();
 });
+// The look as JSON: the engine parameters (what the app and the Python tools read) plus the print exposure,
+// which import restores and the app ignores.
 $<HTMLButtonElement>('exportButton').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(state.parameters, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ ...state.parameters, printExposureEV: state.printExposureEV }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${state.parameters.name.replace(/\s+/g, '-') || 'technichrome'}.json`;
@@ -566,7 +573,9 @@ importInput.addEventListener('change', async () => {
   const f = importInput.files?.[0]; importInput.value = '';
   if (!f) return;
   try {
-    state.parameters = parametersFromJSON(JSON.parse(await f.text()));
+    const json = JSON.parse(await f.text()) as { printExposureEV?: unknown };
+    state.parameters = parametersFromJSON(json);
+    if (typeof json.printExposureEV === 'number' && Number.isFinite(json.printExposureEV)) state.printExposureEV = Math.max(-2, Math.min(2, json.printExposureEV));
     buildLab(labBody, state, () => scheduleRender());
     remeasure();
     scheduleRender();

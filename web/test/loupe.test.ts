@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { LOUPE_HALO, LOUPE_MARGIN, place, planCrop, regionFor, regionServes } from '../src/ui/loupe';
+import { LOUPE_HALO, LOUPE_MARGIN, LOUPE_RESERVE, place, planCrop, regionFor, regionServes } from '../src/ui/loupe';
+import { uniqueName } from '../src/ui/names';
 
 const full = { width: 4032, height: 3024 };
 const preview = { width: 1344, height: 1008 };
+
+describe('print names', () => {
+  it('keeps every print when names collide', () => {
+    const taken = new Set<string>();
+    const take = (base: string) => { const n = uniqueName(base, '.jpg', (x) => taken.has(x)); taken.add(n); return n; };
+    expect(take('Technichrome-IMG_0001')).toBe('Technichrome-IMG_0001.jpg');
+    expect(take('Technichrome-IMG_0001')).toBe('Technichrome-IMG_0001-2.jpg');
+    expect(take('Technichrome-IMG_0001')).toBe('Technichrome-IMG_0001-3.jpg');
+    expect(take('Technichrome-IMG_0002')).toBe('Technichrome-IMG_0002.jpg');
+  });
+});
 
 describe('loupe geometry', () => {
   it('centres a crop of the stage size in device pixels on the tapped preview point, inside the image', () => {
@@ -12,6 +24,14 @@ describe('loupe geometry', () => {
     expect(corner).toEqual({ x: 0, y: 0, width: 1800, height: 1200 });
     const far = planCrop(full, preview, { x: 1344, y: 1008 }, { width: 900, height: 600 }, 2, 4096);
     expect(far).toEqual({ x: 4032 - 1800, y: 3024 - 1200, width: 1800, height: 1200 });
+  });
+
+  it('keeps the uploaded region within the GPU texture limit', () => {
+    const maxTexture = 2048;
+    const crop = planCrop(full, preview, { x: 672, y: 504 }, { width: 3000, height: 3000 }, 2, maxTexture - 2 * LOUPE_RESERVE);
+    const region = regionFor(crop, full);
+    expect(Math.max(region.width, region.height)).toBeLessThanOrEqual(maxTexture);
+    expect(crop.width).toBe(maxTexture - 2 * LOUPE_RESERVE);
   });
 
   it('never exceeds the image, the GPU limit or the maximum edge', () => {
