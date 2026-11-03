@@ -3,6 +3,10 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 21 — halation and misregistration on the web (#22)
+- The web engine now runs the two spatial stages it lacked, so every slider of the app's Laboratory has its counterpart: the halation glow (highlights above a threshold, blurred over a percentage of the long edge, added to the scene before the separation negatives and the key, as `tc_bloom_threshold` and `tc_scene_exposure` do) and the misregistration (the three dyes pulled apart at 120° in the print pass, bilinearly, the key kept in register, as `misregister()` does). Both are off in the shipped look.
+- The glow is one field per photograph, built from its preview (reduced so the blur's σ is at most 8 texels, then a Gaussian) and sampled in the image's normalised coordinates, so the preview, the 1:1 loupe and every export tile see the same glow; the misregistration reads the densities by integer texel plus a fixed offset, so tiles and crops stay bitwise identical to a whole-image render (checked in CI with both stages on). The glow itself is checked against a CPU reference, and the app's own test (a uniform image shifted against itself prints unchanged) runs on the web too.
+
 ## Round 20 — breathing room (#21)
 - The page says less at once. The info line keeps the facts that change (counter, label, size, print timing, the crop, what is being compared); the camera model, exposure, decode time and the embedded JPEG's size moved to a *Details* line that opens on request; one-off messages (saved, copied, the look from a link, errors) have a line of their own that clears itself after a few seconds.
 - Plain / A / Camera are one hold-to-compare control under the picture, lit while held; the hints over the picture fade after a few seconds (`?` keeps the full list); the Laboratory's sections collapse (only Exposure open at first, the choice remembered) and its look actions are text under the look's name; the header and footer are two calm rows on a phone.

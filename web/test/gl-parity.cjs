@@ -47,6 +47,13 @@ const server = http.createServer((req, res) => {
   // Tiled and windowed rendering must reproduce the whole-image render: a synthetic image printed whole, in 96 px
   // tiles with their blur halo, and as a crop through a window, compared in float.
   const tiled = await page.evaluate(() => window.__technichromeTiledCheck(331, 247, 96));
+  // The same with the halation glow and the misregistration on: the glow is one field for the whole image, the
+  // shift widens the halo, and tiles and crops must still reproduce the whole-image render exactly.
+  const tiledSpatial = await page.evaluate(() => window.__technichromeTiledCheck(331, 247, 96, { misregistrationAt4K: 30, bloomAmount: 0.3, bloomThreshold: 0.6, bloomRadiusPercent: 3 }));
+  // The glow against the CPU reference (4% of a 96 px edge: σ 3.84 px, computed at full resolution), and the
+  // app's own misregistration test.
+  const bloom = await page.evaluate(() => window.__technichromeBloomCheck(96, 64, 0.3, 0.6, 4));
+  const shift = await page.evaluate(() => window.__technichromeShiftCheck());
   await browser.close();
   server.close();
   const tolerance = 0.02;
@@ -55,11 +62,21 @@ const server = http.createServer((req, res) => {
   console.log(`tiled vs whole: ${tiled.tiledVsWhole.toExponential(2)} (print, ${tiled.tiles} tiles, halo ${tiled.halo} px), ${tiled.plainTiledVsWhole.toExponential(2)} (plain); crop vs whole: ${tiled.cropVsWhole.toExponential(2)} (tolerance ${tiledTolerance})`);
   const tiledOk = tiled.tiledVsWhole < tiledTolerance && tiled.plainTiledVsWhole < tiledTolerance && tiled.cropVsWhole < tiledTolerance && tiled.halo > 0 && tiled.tiles === 12;
   if (!tiledOk) console.log('tiled rendering does not match the whole-image render');
+  console.log(`with glow and misregistration — tiled vs whole: ${tiledSpatial.tiledVsWhole.toExponential(2)} (halo ${tiledSpatial.halo} px); crop vs whole: ${tiledSpatial.cropVsWhole.toExponential(2)}`);
+  const spatialOk = tiledSpatial.tiledVsWhole < tiledTolerance && tiledSpatial.cropVsWhole < tiledTolerance && tiledSpatial.halo > tiled.halo;
+  if (!spatialOk) console.log('tiled rendering with the spatial stages does not match the whole-image render');
+  const bloomTolerance = 5e-3;
+  console.log(`halation vs CPU reference: ${bloom.vsReference.toExponential(2)} (tolerance ${bloomTolerance}); its effect on the print ${bloom.effect.toFixed(3)}`);
+  const bloomOk = bloom.vsReference < bloomTolerance && bloom.effect > 0.01 && bloom.factor === 1;
+  if (!bloomOk) console.log('the halation glow does not match the CPU reference, or does nothing');
+  console.log(`misregistration: a uniform image changes by ${shift.uniform.toExponential(2)} (must be < 0.01), a checkerboard by ${shift.textured.toFixed(3)} (must be > 0.001)`);
+  const shiftOk = shift.uniform < 0.01 && shift.textured > 0.001;
+  if (!shiftOk) console.log('misregistration moved a uniform image, or did nothing to a textured one');
   if (!(worst < tolerance)) {
     for (let i = 0; i < Math.min(6, outputs.length); i++) {
       console.log(`  sample ${i} input ${JSON.stringify(inputs[i])} gpu ${outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${fixture.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
     }
   }
   if (errors.length) console.log(errors.join('\n'));
-  if (!(worst < tolerance) || !tiledOk || errors.length) process.exit(1);
+  if (!(worst < tolerance) || !tiledOk || !spatialOk || !bloomOk || !shiftOk || errors.length) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });

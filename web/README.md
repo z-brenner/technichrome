@@ -80,6 +80,15 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
 * **A look as a link.** *Copy link* in the Laboratory puts the current look (parameters and print exposure,
   deflated, about 1 KB) in the address bar and on the clipboard; opening that link anywhere applies the look,
   so a look tuned on a desk reaches a phone without a file. The JSON export remains the form the app reads.
+* **Halation and misregistration.** The Spatial section of the Laboratory has the app's four other spatial
+  sliders. *Halation* adds a glow of the highlights above *Halation threshold* (in the file's own linear units,
+  before exposure and timing, as in the app) blurred over *Halation radius* percent of the long edge, to the scene
+  the negatives and the key see. The glow is one field per photograph, computed from its preview (reduced so the
+  blur stays small, then a Gaussian) and sampled in the image's own coordinates, so the preview, the loupe and
+  every export tile show the same glow; the app blurs at full resolution, so the two agree to within the
+  preview's resampling, not bit for bit. *Misregistration* pulls the three dyes apart at 120° (cyan to the right,
+  magenta and yellow down and up to the left), bilinearly, with the key image kept in register, exactly as the
+  app does; tiles and crops stay bitwise identical to a whole-image render with it on, which CI checks.
 * **Memory.** The full decode is kept as LibRaw produced it (16-bit codes, 6 bytes per pixel) or as
   8-bit sRGB (3 bytes), linearised through a table region by region when the engine needs it, rather
   than as floats (12 bytes): a 12 MP DNG holds 72 MB, a 48 MP ProRAW 290 MB, plus the small float preview.
@@ -144,7 +153,6 @@ out-of-gamut colours. Saved JPEGs carry the P3 profile on P3-capable browsers.
 
 ## What it does not do (yet)
 
-* Misregistration and halation are not rendered (both are off in the shipped look).
 * No EXIF is written into the saved JPEG, and the DNG is not preserved alongside it (open it again from
   your files; nothing was uploaded in the first place).
 * Full-resolution export is no longer bounded by the GPU's texture size (it is tiled), but it is by what

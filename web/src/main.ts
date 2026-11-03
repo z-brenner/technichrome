@@ -5,7 +5,7 @@
 
 import { type EngineParameters, cloneParameters, parametersFromJSON } from './engine/parameters';
 import { geometricMeanLuminance, timingExposureEV } from './engine/timing';
-import { GLEngine, type GLSource, type SourceWindow } from './gl/engine';
+import { GLEngine, type GLSource, type SourceWindow, type GlowField, type GlowSample } from './gl/engine';
 import { renderTiled } from './gl/tiled';
 import { type DecodedSource, type LinearImage, type StoredImage, decodeFile, downsample, isOpenable, linearFromBitmap, linearRegion, sourceBytes } from './raw/decoder';
 import { startCamera, type CameraSession } from './ui/camera';
@@ -68,6 +68,9 @@ for (const id of ['renderingNote', 'helpNote']) $<HTMLSpanElement>(id).textConte
 const state: LabState = defaultLabState();
 let source: DecodedSource | null = null;
 let previewTexture: GLSource | null = null;
+/** The halation glow of the shown photograph, built from its preview for the preview and the loupe alike;
+ *  rebuilt when the look's threshold or radius change, dropped with the preview. */
+let previewGlow: { field: GlowField; key: string } | null = null;
 let timingEV = 0;
 let comparing = false;
 let camera: CameraSession | null = null;
@@ -279,6 +282,19 @@ function updateReadout() {
   });
 }
 
+/** The glow field for a look (none when the look has no halation), as a sample over `full` from `origin`. */
+function glowSample(p: EngineParameters, full: { width: number; height: number }, origin: { x: number; y: number }): GlowSample | undefined {
+  if (!previewTexture || !(p.bloomAmount > 0)) return undefined;
+  const key = `${p.bloomThreshold}|${p.bloomRadiusPercent}`;
+  if (!previewGlow || previewGlow.key !== key) previewGlow = { field: engine.buildGlow(previewTexture, p, previewGlow?.field), key };
+  return { field: previewGlow.field, full: { width: full.width, height: full.height }, origin: { x: origin.x, y: origin.y } };
+}
+
+function dropPreview() {
+  engine.deleteGlow(previewGlow?.field); previewGlow = null;
+  engine.deleteSource(previewTexture); previewTexture = null;
+}
+
 function renderStill() {
   if (!source) return;
   if (showingCamera && cameraBitmap?.source === source) { renderCameraRendering(cameraBitmap.bitmap); refreshInfo(); updateReadout(); return; }
@@ -287,10 +303,10 @@ function renderStill() {
   if (loupe) {
     const window: SourceWindow = { x: loupe.crop.x - loupe.region.x, y: loupe.crop.y - loupe.region.y, width: loupe.crop.width, height: loupe.crop.height };
     if (comparing) engine.renderPlain(loupe.texture, scale, output, null, window);
-    else engine.render(loupe.texture, L.parameters, { exposureScale: scale, spatial: true, output, longEdge: Math.max(source.full.width, source.full.height), window });
+    else engine.render(loupe.texture, L.parameters, { exposureScale: scale, spatial: true, output, longEdge: Math.max(source.full.width, source.full.height), window, glow: glowSample(L.parameters, source.full, loupe.region) });
   } else if (previewTexture) {
     if (comparing) engine.renderPlain(previewTexture, scale, output);
-    else engine.render(previewTexture, L.parameters, { exposureScale: scale, spatial: true, output });
+    else engine.render(previewTexture, L.parameters, { exposureScale: scale, spatial: true, output, glow: glowSample(L.parameters, source.preview, { x: 0, y: 0 }) });
   }
   refreshInfo();
   updateReadout();
@@ -319,7 +335,7 @@ async function showSource(s: DecodedSource) {
   stopCamera();
   closeLoupe(false);
   if (cameraBitmap && cameraBitmap.source !== s) releaseCameraBitmap();   // never keep another photograph's decode alive
-  engine.deleteSource(previewTexture);
+  dropPreview();
   source = s;
   remeasure();
   previewTexture = engine.uploadLinear(s.preview.rgb, s.preview.width, s.preview.height);
@@ -522,7 +538,7 @@ async function openCamera() {
     closeLoupe(false);
     releaseCameraBitmap();
     source = null;
-    engine.deleteSource(previewTexture); previewTexture = null;
+    dropPreview();
     fitCanvas(camera.width, camera.height);
     badge.hidden = false; badge.textContent = 'camera · not raw'; badge.classList.add('warn');
     hint.hidden = true;
@@ -584,13 +600,13 @@ async function photograph() {
 // MARK: saving
 
 /** Develops `image` tile by tile into a canvas of its size and encodes a JPEG. Throws when the browser refuses the size. */
-async function developToBlob(image: StoredImage | LinearImage, p: EngineParameters, exposureScale: number, progress: (done: number, total: number) => void): Promise<Blob> {
+async function developToBlob(image: StoredImage | LinearImage, p: EngineParameters, exposureScale: number, glow: GlowField | undefined, progress: (done: number, total: number) => void): Promise<Blob> {
   const canvas = document.createElement('canvas');
   canvas.width = image.width; canvas.height = image.height;
   const ctx = canvas.getContext('2d', output === 'displayP3' ? ({ colorSpace: 'display-p3' } as CanvasRenderingContext2DSettings) : undefined);
   if (!ctx) throw new Error(`could not create a ${image.width}×${image.height} canvas`);
   await renderTiled(engine, image, {
-    parameters: p, exposureScale, output, spatial: true,
+    parameters: p, exposureScale, output, spatial: true, glow,
     onTile: (pixels, t) => {
       const px = pixels as Uint8ClampedArray<ArrayBuffer>;
       const data = output === 'displayP3' ? new ImageData(px, t.width, t.height, { colorSpace: 'display-p3' } as ImageDataSettings) : new ImageData(px, t.width, t.height);
@@ -611,15 +627,26 @@ async function developPrint(src: DecodedSource, L: Look, progress: (done: number
   const scale = exposureScaleFor(parameters, src.baselineEV, L.printExposureEV + L.timingEV);
   let image: StoredImage | LinearImage = src.full;
   let note = '';
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const blob = await developToBlob(image, parameters, scale, progress);
-      return { blob, width: image.width, height: image.height, note };
-    } catch (e) {
-      if (attempt >= 3 || Math.max(image.width, image.height) <= 2048) throw e;
-      image = downsample(src.full, Math.ceil(Math.max(image.width, image.height) / 2));
-      note = ` (reduced to ${image.width}×${image.height}: this browser could not produce the full size)`;
+  // The halation glow is a whole-image quantity: built once from this photograph's own preview (the set's other
+  // files are not the one on screen) and shared by every tile, in the image's normalised coordinates.
+  let glow: GlowField | undefined;
+  if (parameters.bloomAmount > 0) {
+    const preview = engine.uploadLinear(src.preview.rgb, src.preview.width, src.preview.height);
+    try { glow = engine.buildGlow(preview, parameters); } finally { engine.deleteSource(preview); }
+  }
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const blob = await developToBlob(image, parameters, scale, glow, progress);
+        return { blob, width: image.width, height: image.height, note };
+      } catch (e) {
+        if (attempt >= 3 || Math.max(image.width, image.height) <= 2048) throw e;
+        image = downsample(src.full, Math.ceil(Math.max(image.width, image.height) / 2));
+        note = ` (reduced to ${image.width}×${image.height}: this browser could not produce the full size)`;
+      }
     }
+  } finally {
+    engine.deleteGlow(glow);
   }
 }
 
