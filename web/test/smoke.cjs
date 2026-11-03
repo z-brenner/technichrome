@@ -214,6 +214,15 @@ const server = http.createServer((req, res) => {
   fs.writeFileSync(crafted, JSON.stringify({ name: '<img src=x onerror="window.__xss=1">', keyStrength: 0.3 }));
   await page.setInputFiles('#importInput', crafted);
   await page.waitForTimeout(300);
+  // The readout: a histogram and clipping figures for what is on screen, once the Laboratory is open.
+  await page.waitForFunction(() => /highlights clipped \S+% · shadows crushed \S+%/.test(document.getElementById('readoutText').textContent), null, { timeout: 8000 }).then(() => true, () => false).then((ok) => check(ok, `the readout shows clipping figures (got "${''}")`));
+  console.log(`readout: ${await page.textContent('#readoutText')}`);
+  check((await page.evaluate(() => { const c = document.getElementById('histogram'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let lit = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++; return lit; })) > 200, 'the histogram canvas has been drawn');
+  // Help: ? opens it, Escape closes it.
+  await page.keyboard.press('?');
+  check(!(await page.isHidden('#help')), '? opens the help');
+  await page.keyboard.press('Escape');
+  check(await page.isHidden('#help'), 'Escape closes the help');
   await page.click('#pinButton');
   await page.keyboard.down('a');
   check(await infoSays('showing A', true), 'the crafted look shows as A');

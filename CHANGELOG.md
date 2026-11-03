@@ -3,6 +3,10 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 18 — readout and help (#19)
+- The Laboratory shows a histogram of what is on screen with the share of clipped highlights and crushed shadows, refreshed after every render; `?` lists the keys and gestures.
+- The top-level README describes the web bench as it now is.
+
 ## Round 17 — the camera's own rendering (#18)
 - Hold C or the *Camera's JPEG* button to see the JPEG the camera embedded in the file (Apple's full-size rendering for a ProRAW; a small preview, scaled, for most Bayer DNGs), in the preview or the loupe, so the print can be judged against the phone's own processing.
 
