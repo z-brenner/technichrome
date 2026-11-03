@@ -149,12 +149,12 @@ const server = http.createServer((req, res) => {
   await page.click('#pinButton');
   check(!(await page.isHidden('#showAButton')), 'the hold-for-A button appears once pinned');
   await page.locator('#labBody input[type=range]').first().fill('0.5');
+  // The info line follows the next render, which the software GPU can take a while over: poll, do not sleep.
+  const infoSays = (text, wanted) => page.waitForFunction(([t, w]) => document.getElementById('info').textContent.includes(t) === w, [text, wanted], { timeout: 8000 }).then(() => true, () => false);
   await page.keyboard.down('a');
-  await page.waitForTimeout(200);
-  check((await page.textContent('#info')).includes('showing A'), 'holding A shows the pinned look');
+  check(await infoSays('showing A', true), 'holding A shows the pinned look');
   await page.keyboard.up('a');
-  await page.waitForTimeout(200);
-  check(!(await page.textContent('#info')).includes('showing A'), 'releasing A returns to the current look');
+  check(await infoSays('showing A', false), 'releasing A returns to the current look');
   // A look as a link: Copy link puts it in the hash; a fresh page opened on that link gets the same sliders.
   await page.click('#linkButton');
   await page.waitForTimeout(200);
