@@ -531,7 +531,9 @@ async function openCamera() {
     saveButton.hidden = true;
     captureButton.hidden = false;
     stopCameraButton.hidden = false;
-    compare.hidden = true;
+    compare.hidden = false;            // hold Plain, or A once pinned, against the live print; there is no camera JPEG
+    compareCamera.hidden = true;
+    compareA.hidden = !pinned;
     clearStatus();
     cameraTimingEV = 0; frameCounter = 0;
     const loop = () => {
@@ -712,7 +714,7 @@ async function saveSet() {
 function pinLook() {
   pinned = { parameters: cloneParameters(state.parameters), printExposureEV: state.printExposureEV, timingEV };
   pinButton.textContent = 'Re-pin as A';
-  compareA.hidden = !source || !!camera;
+  compareA.hidden = !source && !camera;   // whatever is on screen, the photograph or the live camera, can be held against A
   updateHint();
   setStatus('<b>pinned the current look as A</b> · hold A to see it');
 }
