@@ -15,6 +15,7 @@ import { LOUPE_MAX_EDGE, LOUPE_RESERVE, type Rect, place, planCrop, regionFor, r
 import { uniqueName } from './ui/names';
 import { decodeLook, encodeLook } from './ui/looklink';
 import { escapeHTML as esc } from './ui/html';
+import { describeClipping, drawHistogram, histogramOf } from './ui/histogram';
 import { strToU8, zipSync } from 'fflate';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -42,6 +43,9 @@ const nextButton = $<HTMLButtonElement>('nextButton');
 const counter = $<HTMLSpanElement>('counter');
 const pinButton = $<HTMLButtonElement>('pinButton');
 const cameraHoldButton = $<HTMLButtonElement>('cameraHoldButton');
+const histogramCanvas = $<HTMLCanvasElement>('histogram');
+const readoutText = $<HTMLDivElement>('readoutText');
+const help = $<HTMLDivElement>('help');
 const linkButton = $<HTMLButtonElement>('linkButton');
 const showAButton = $<HTMLButtonElement>('showAButton');
 
@@ -159,7 +163,10 @@ function updateHint() {
 function setLabOpen(open: boolean) {
   lab.hidden = !open;
   makeRoomForSheet();
+  if (open) updateReadout();
 }
+
+function setHelpOpen(open: boolean) { help.hidden = !open; }
 
 function makeRoomForSheet() {
   let padding = '';
@@ -216,9 +223,25 @@ function renderCameraRendering(bitmap: ImageBitmap) {
   engine.renderPlain(cameraFrameTexture, 1, 'sRGB');   // pass-through: the scratch canvas already matches the drawing buffer's colour space
 }
 
+/** The Laboratory's readout: a histogram of what is on screen and how much of it is clipped. Read after a render. */
+let readoutQueued = false;
+function updateReadout() {
+  if (lab.hidden || readoutQueued) return;
+  readoutQueued = true;
+  requestAnimationFrame(() => {
+    readoutQueued = false;
+    if (lab.hidden || view.hidden || view.width === 0) return;
+    const step = Math.max(1, Math.round(Math.sqrt((view.width * view.height) / 400_000)));   // about 400k pixels sampled
+    const h = histogramOf(engine.readCanvas(), view.width, view.height, step);
+    drawHistogram(histogramCanvas, h);
+    const what = showingCamera ? "the camera's rendering" : comparing ? 'the plain decode' : showingA && pinned ? 'look A' : loupe ? 'the print, this crop' : camera ? 'the camera preview' : 'the print';
+    readoutText.textContent = `${what} · ${describeClipping(h)}`;
+  });
+}
+
 function renderStill() {
   if (!source) return;
-  if (showingCamera && cameraBitmap?.source === source) { renderCameraRendering(cameraBitmap.bitmap); info.innerHTML = describe(); return; }
+  if (showingCamera && cameraBitmap?.source === source) { renderCameraRendering(cameraBitmap.bitmap); info.innerHTML = describe(); updateReadout(); return; }
   const L = look();
   const scale = exposureScaleFor(L.parameters, source.baselineEV, L.printExposureEV + L.timingEV);
   if (loupe) {
@@ -230,6 +253,7 @@ function renderStill() {
     else engine.render(previewTexture, L.parameters, { exposureScale: scale, spatial: true, output });
   }
   info.innerHTML = describe();
+  updateReadout();
 }
 
 let renderQueued = false;
@@ -485,6 +509,7 @@ async function openCamera() {
       if (comparing) engine.renderPlain(cameraTexture, scale, output);
       else engine.render(cameraTexture, p, { exposureScale: scale, spatial: false, output });
       if (frameCounter % 15 === 0) info.innerHTML = describe();
+      if (frameCounter % 30 === 0) updateReadout();
     };
     loop();
   } catch (e) {
@@ -664,6 +689,9 @@ saveAllButton.addEventListener('click', () => void saveSet());
 prevButton.addEventListener('click', () => void showEntry(queueIndex - 1));
 nextButton.addEventListener('click', () => void showEntry(queueIndex + 1));
 $<HTMLButtonElement>('labButton').addEventListener('click', () => setLabOpen(lab.hidden));
+$<HTMLButtonElement>('helpButton').addEventListener('click', () => setHelpOpen(help.hidden));
+$<HTMLButtonElement>('helpClose').addEventListener('click', () => setHelpOpen(false));
+help.addEventListener('click', (e) => { if (e.target === help) setHelpOpen(false); });
 $<HTMLButtonElement>('labClose').addEventListener('click', () => setLabOpen(false));
 $<HTMLButtonElement>('resetButton').addEventListener('click', () => {
   const fresh = defaultLabState();
@@ -774,7 +802,8 @@ window.addEventListener('keydown', (e) => {
   const onSlider = t instanceof HTMLInputElement;
   if (e.key === 'ArrowRight' && !onSlider) { e.preventDefault(); void showEntry(queueIndex + 1); }
   else if (e.key === 'ArrowLeft' && !onSlider) { e.preventDefault(); void showEntry(queueIndex - 1); }
-  else if (e.key === 'Escape') { if (batch) batch.cancelled = true; else if (loupe) closeLoupe(); else setLabOpen(false); }
+  else if (e.key === 'Escape') { if (!help.hidden) setHelpOpen(false); else if (batch) batch.cancelled = true; else if (loupe) closeLoupe(); else setLabOpen(false); }
+  else if (e.key === '?') setHelpOpen(help.hidden);
   else if ((e.key === 'a' || e.key === 'A') && !e.repeat) setShowingA(true);
   else if ((e.key === 'c' || e.key === 'C') && !e.repeat) void setCameraHeld(true);
 });

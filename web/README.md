@@ -51,6 +51,9 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
   in the file: for an Apple ProRAW that is Apple's full-size rendering of the same capture, for most Bayer DNGs
   a small preview, shown scaled and said so. It is decoded by the browser with its colour profile and shown as
   it is, never through the engine, so the print can be judged against what the phone would have given.
+* **Readout.** The Laboratory shows a histogram of what is on screen (the print, the plain decode, look A, the
+  camera's rendering, or the loupe's crop) with the share of clipped highlights and crushed shadows, refreshed
+  after every render. The `?` key or button lists the keys and gestures.
 * **Pin a look as A.** In the Laboratory, *Pin as A* keeps the current parameters and print exposure;
   then hold the A key (or the *Hold for A* button) to see A against whatever the sliders say now, in
   the preview or in the loupe. A saved JPEG while holding A is the pinned look (`-A` in the file name).

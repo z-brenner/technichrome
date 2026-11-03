@@ -54,7 +54,16 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .lab { width: min(380px, 100%); border-left: 1px solid var(--ivory-faint); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
 .lab-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--ivory-faint); }
 .lab-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.32em; }
+.readout { padding: 12px 18px 0; }
+.readout canvas { display: block; width: 100%; height: 72px; background: var(--bg); border: 1px solid var(--ivory-faint); border-radius: 4px; }
+.readout-text { font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ivory-dim); margin-top: 6px; }
 .lab-body { flex: 1; overflow: auto; padding: 8px 18px 18px; }
+.help { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(11,10,9,0.86); }
+.help-card { max-width: 460px; width: 100%; max-height: calc(100dvh - 40px); overflow: auto; padding: 26px 30px; border: 1px solid var(--ivory-faint); background: var(--panel); }
+.help-card dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 18px 0; font-size: 15px; }
+.help-card dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ivory); padding-top: 3px; }
+.help-card dd { margin: 0; color: var(--ivory-dim); }
+.help-foot { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ivory-dim); margin-bottom: 16px; line-height: 1.6; }
 .lab-foot { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--ivory-faint); }
 .section { margin-top: 18px; }
 .section-title { font-family: var(--mono); font-size: 9px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--ivory-dim); margin-bottom: 8px; }
@@ -78,8 +87,9 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 /* Phones: a compact header, the Laboratory as a sheet over the lower part of the screen, the picture kept visible. */
 @media (max-width: 760px) {
-  .bar { padding: 10px 16px; gap: 10px; }
+  .bar { padding: 10px 16px; gap: 10px; position: relative; }
   .sub { display: none; }
+  #helpButton { position: absolute; top: 8px; right: 16px; padding: 6px 10px; }
   .wordmark { font-size: 13px; letter-spacing: 0.36em; }
   .actions { width: 100%; justify-content: space-between; gap: 6px; }
   .actions .pill { padding: 8px 10px; font-size: 9px; letter-spacing: 0.12em; }
@@ -89,7 +99,7 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   .lab-foot .pill { padding: 7px 10px; font-size: 9px; letter-spacing: 0.12em; }
   .foot { padding: 10px 16px; gap: 10px; }
   .info { font-size: 10px; line-height: 1.5; min-width: 0; width: 100%; }
-  .foot-actions { width: 100%; justify-content: space-between; }
+  .foot-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
   .hint { bottom: 14px; max-width: 92%; text-align: center; }
   .badge { top: 20px; left: 20px; }
 }

@@ -389,6 +389,15 @@ export class GLEngine {
     return flipped;
   }
 
+  /** Reads the canvas itself back (RGBA8, GL row order, which a histogram does not mind). */
+  readCanvas(): Uint8Array {
+    const gl = this.gl;
+    const out = new Uint8Array(this.canvas.width * this.canvas.height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, this.canvas.width, this.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    return out;
+  }
+
   /** Reads an 8-bit target back (RGBA8), rows top to bottom. */
   readBytes(target: { framebuffer: WebGLFramebuffer; width: number; height: number }): Uint8ClampedArray<ArrayBuffer> {
     const gl = this.gl;

@@ -27,12 +27,15 @@ Everything runs on the phone. No accounts, no network, no presets — one meticu
 
 `web/` is the same engine in a browser tab, for testing the processing before the app reaches a phone:
 open a DNG (decoded on the device with LibRaw compiled to WebAssembly, using the settings the look was
-tuned on), or a whole folder of them, or use the camera (labelled *not RAW*: browsers do not expose sensor
-data), see the print, double-tap for a 1:1 loupe of the full decode, pin a look and hold A to compare it,
-hold to compare, adjust everything in the Laboratory, save a JPEG. The per-pixel maths is a port of the
-Swift core tested against the same Python fixture (1.6e-8), and the WebGL shaders are checked against it
-in headless Chromium in CI (1.2e-4). Nothing is uploaded. See `web/README.md` for running it locally and
-for push-to-deploy on Cloudflare Pages.
+tuned on), or a whole folder of them as a set, or use the camera (labelled *not RAW*: browsers do not
+expose sensor data). See the print; hold for the plain decode; double-tap for a 1:1 loupe of the full
+decode and drag it around; hold C for the camera's own JPEG of the same capture (Apple's rendering, for a
+ProRAW); pin a look as A and hold A to compare; read the histogram and clipping figures; adjust everything
+in the Laboratory; copy a look as a link that opens on a phone; save a full-resolution JPEG or the whole
+set as a zip with the look's JSON. The per-pixel maths is a port of the Swift core tested against the same
+Python fixture (1.6e-8), the WebGL shaders are checked against it in headless Chromium in CI (1.2e-4), and
+the tiled full-resolution export is checked bitwise against a whole-image render. Nothing is uploaded. See
+`web/README.md` for running it locally and for push-to-deploy on Cloudflare Pages.
 
 ## Repository layout
 
