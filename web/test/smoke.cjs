@@ -222,6 +222,14 @@ const server = http.createServer((req, res) => {
     check(await roomFollows(), 'the room follows the footer growing by a status line');
     await page.waitForFunction(() => document.getElementById('status').hidden, null, { timeout: 12000 }).then(() => true, () => false).then((ok) => check(ok, 'the status line clears itself'));
     check(await roomFollows(), 'the room follows the footer shrinking when the status clears');
+    // The sheet covers the footer, so the compare control and the status line sit in the sheet while it is open.
+    check(await page.locator('#lab #compare').count() === 1 && !(await page.isHidden('#lab #compare')), 'the compare control sits in the open sheet');
+    check(await page.locator('#lab .look #status').count() === 1, 'the status line sits under the look actions in the open sheet');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    check(await page.locator('.foot-actions #compare').count() === 1 && await page.locator('.foot-text #status').count() === 1, 'both return to the footer when the sheet closes');
+    await page.click('#labButton');
+    await page.waitForTimeout(300);
     // The same with a wide photograph, which the sheet used to cover almost entirely (needs a second file).
     if (inputs.length > 1) {
     await page.keyboard.press('Escape');
