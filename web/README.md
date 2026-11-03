@@ -68,6 +68,11 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
 * **Memory.** The full decode is kept as LibRaw produced it (16-bit codes, 6 bytes per pixel) or as
   8-bit sRGB (3 bytes), linearised through a table region by region when the engine needs it, rather
   than as floats (12 bytes): a 12 MP DNG holds 72 MB, a 48 MP ProRAW 290 MB, plus the small float preview.
+  Measured once in headless Chromium with software rendering on a 61 MP Sony ARW (117 MB): decoded in 18 s,
+  about 400 MB held afterwards, the loupe in 0.6 s, the full 9568×6376 JPEG saved in 27 s (a real GPU is far
+  quicker at the last step). A phone's limits remain untested.
+* **Nothing from a file, a camera or a link is interpreted as markup.** Camera models, file names, look names
+  and error messages are escaped before the info line shows them.
 
 ## Running it
 
