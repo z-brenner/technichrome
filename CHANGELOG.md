@@ -3,6 +3,9 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 19 — the end-to-end test in CI (#20)
+- Two small synthetic Bayer DNGs (`tools/colorscience/make_test_dng.py`) let the web smoke test run in CI on every push, desktop and as an iPhone: decode, set navigation, loupe and drag, A/B, saved print and zip, look links, the crafted-name check, readout, help. Screenshots are kept as a CI artifact.
+
 ## Round 18 — readout and help (#19)
 - The Laboratory shows a histogram of what is on screen with the share of clipped highlights and crushed shadows, refreshed after every render; `?` lists the keys and gestures.
 - The top-level README describes the web bench as it now is.

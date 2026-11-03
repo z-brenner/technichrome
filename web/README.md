@@ -91,10 +91,21 @@ npm test             # parity with the Python fixture, timing, transfer function
 npm run build        # type-check + production build into dist/
 npm run test:gl      # GPU parity of the built site in headless Chromium, and tiled / windowed rendering against a
                      # whole-image render (needs `npx playwright install chromium`)
+npm run test:smoke   # end to end in headless Chromium on two synthetic Bayer DNGs checked in under test/fixtures
+npm run test:smoke:mobile   # the same as an iPhone (both run in CI; screenshots are kept as a CI artifact)
 node test/smoke.cjs out.png a.dng b.dng   # end to end on real files: opens them as a set, steps through it, opens
                      # and drags the loupe, pins a look and holds A, saves a print (checks the JPEG's size) and the
                      # set as a zip (checks its contents), screenshots (not in CI: it needs DNGs)
 MOBILE=1 node test/smoke.cjs out.png a.dng   # the same as an iPhone (touch double-tap, 3× display, the Laboratory sheet)
+```
+
+The synthetic DNGs (`test/fixtures/synthetic-a.dng`, landscape, and `synthetic-b.dng`, portrait with a −0.5 EV
+baseline exposure) are plain uncompressed RGGB mosaics of a synthetic scene (an exposure sweep, an 18 % grey
+patch, two colour discs, a clipping highlight) with the tags LibRaw needs, written by
+`tools/colorscience/make_test_dng.py`; LibRaw returns their grey patch neutral at 0.18. They stand in for real
+photographs in CI only: the look itself was tuned on, and is judged against, real DNGs.
+
+```
 ```
 
 The RAW decoder is a pthreads build and needs `SharedArrayBuffer`, so the page must be

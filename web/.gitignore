@@ -3,3 +3,4 @@ dist/
 .vite/
 test-results/
 *.log
+smoke*.png

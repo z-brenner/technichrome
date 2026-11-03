@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:gl": "node test/gl-parity.cjs",
-    "check": "npm run test && npm run build && npm run test:gl"
+    "check": "npm run test && npm run build && npm run test:gl && npm run test:smoke && npm run test:smoke:mobile",
+    "test:smoke": "node test/smoke.cjs smoke.png test/fixtures/synthetic-a.dng test/fixtures/synthetic-b.dng",
+    "test:smoke:mobile": "MOBILE=1 node test/smoke.cjs smoke-mobile.png test/fixtures/synthetic-a.dng test/fixtures/synthetic-b.dng"
   },
   "dependencies": {
     "fflate": "^0.8.2",
