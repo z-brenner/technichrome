@@ -3,6 +3,9 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 17 — the camera's own rendering (#18)
+- Hold C or the *Camera's JPEG* button to see the JPEG the camera embedded in the file (Apple's full-size rendering for a ProRAW; a small preview, scaled, for most Bayer DNGs), in the preview or the loupe, so the print can be judged against the phone's own processing.
+
 ## Round 16 — a look as a link (#17)
 - *Copy link* in the Laboratory encodes the look (parameters and print exposure) into the page's hash and copies the address; opening it anywhere applies the look.
 

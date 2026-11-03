@@ -41,6 +41,7 @@ const prevButton = $<HTMLButtonElement>('prevButton');
 const nextButton = $<HTMLButtonElement>('nextButton');
 const counter = $<HTMLSpanElement>('counter');
 const pinButton = $<HTMLButtonElement>('pinButton');
+const cameraHoldButton = $<HTMLButtonElement>('cameraHoldButton');
 const linkButton = $<HTMLButtonElement>('linkButton');
 const showAButton = $<HTMLButtonElement>('showAButton');
 
@@ -77,6 +78,16 @@ let queueIndex = -1;
 let openSerial = 0;
 let useClock = 0;
 const CACHE_BUDGET_BYTES = 700e6;
+
+/** The camera's own rendering (the JPEG embedded in the file), decoded on first use and kept for the current source. */
+let cameraBitmap: { source: DecodedSource; bitmap: ImageBitmap } | null = null;
+let cameraFrameTexture: GLSource | null = null;
+let cameraHeld = false;       // what the user asks for
+let showingCamera = false;    // what is on screen (follows cameraHeld once the JPEG is decoded)
+const cameraScratch = document.createElement('canvas');
+// On a P3 canvas the scratch context is P3 too, so a Display P3 JPEG (an iPhone's) keeps its colours; the frame is then
+// shown as it is, with no sRGB→P3 conversion, because its encoding already matches the drawing buffer.
+let cameraScratchContext: CanvasRenderingContext2D | null = null;
 
 /** The loupe: a crop of the full decode shown 1:1 in device pixels, from a region uploaded with halo and margin. */
 let loupe: { crop: Rect; region: Rect; texture: GLSource } | null = null;
@@ -122,7 +133,12 @@ function describe(): string {
   if (source.kind === 'display') parts.push('developed as display-referred data');
   if (loupe) parts.push(`1:1 crop at ${loupe.crop.x},${loupe.crop.y}`);
   if (batch) parts.push(`<b>saving the set · ${batch.done} / ${batch.total}</b>`);
-  if (showingA && pinned) parts.push(`<b>showing A · ${esc(pinned.parameters.name)}</b>`);
+  if (showingCamera && cameraBitmap?.source === source) {
+    // The bitmap's size is after the browser applied the JPEG's orientation, which is how it is compared to the decode.
+    const b = cameraBitmap.bitmap;
+    const scaled = b.width < source.full.width || b.height < source.full.height;
+    parts.push(`<b>the camera's own rendering · ${b.width}×${b.height}${scaled ? ' preview, scaled' : ''}</b>`);
+  } else if (showingA && pinned) parts.push(`<b>showing A · ${esc(pinned.parameters.name)}</b>`);
   return parts.join(' · ');
 }
 
@@ -134,6 +150,7 @@ function updateHint() {
   const bits = [touch ? 'hold to compare' : 'hold to compare with the plain decode', loupe ? 'drag to move · double-tap to leave 1:1' : 'double-tap for 1:1'];
   if (queue.length > 1 && !touch) bits.push('← → for the next photograph');
   if (pinned && !touch) bits.push('hold A for the pinned look');
+  if (source?.cameraJPEG && !touch) bits.push("hold C for the camera's own rendering");
   hint.textContent = bits.join(' · ');
 }
 
@@ -181,8 +198,27 @@ function fitCanvas(width: number, height: number, oneToOne = false) {
 
 // MARK: rendering
 
+/** Draws the camera's JPEG (whole, scaled to the preview, or the loupe's crop at 1:1) into the canvas, colour-managed. */
+function renderCameraRendering(bitmap: ImageBitmap) {
+  if (!source) return;
+  cameraScratchContext ??= cameraScratch.getContext('2d', output === 'displayP3' ? ({ colorSpace: 'display-p3' } as CanvasRenderingContext2DSettings) : undefined);
+  const ctx = cameraScratchContext;
+  if (!ctx) return;
+  if (loupe) {
+    const sx = bitmap.width / source.full.width, sy = bitmap.height / source.full.height;
+    cameraScratch.width = loupe.crop.width; cameraScratch.height = loupe.crop.height;
+    ctx.drawImage(bitmap, loupe.crop.x * sx, loupe.crop.y * sy, loupe.crop.width * sx, loupe.crop.height * sy, 0, 0, loupe.crop.width, loupe.crop.height);
+  } else {
+    cameraScratch.width = view.width; cameraScratch.height = view.height;
+    ctx.drawImage(bitmap, 0, 0, view.width, view.height);
+  }
+  cameraFrameTexture = engine.uploadFrame(cameraScratch, cameraScratch.width, cameraScratch.height, cameraFrameTexture ?? undefined);
+  engine.renderPlain(cameraFrameTexture, 1, 'sRGB');   // pass-through: the scratch canvas already matches the drawing buffer's colour space
+}
+
 function renderStill() {
   if (!source) return;
+  if (showingCamera && cameraBitmap?.source === source) { renderCameraRendering(cameraBitmap.bitmap); info.innerHTML = describe(); return; }
   const L = look();
   const scale = exposureScaleFor(L.parameters, source.baselineEV, L.printExposureEV + L.timingEV);
   if (loupe) {
@@ -218,6 +254,7 @@ function remeasure() {
 async function showSource(s: DecodedSource) {
   stopCamera();
   closeLoupe(false);
+  if (cameraBitmap && cameraBitmap.source !== s) releaseCameraBitmap();   // never keep another photograph's decode alive
   engine.deleteSource(previewTexture);
   source = s;
   remeasure();
@@ -231,7 +268,44 @@ async function showSource(s: DecodedSource) {
   saveButton.hidden = false;
   captureButton.hidden = true;
   stopCameraButton.hidden = true;
+  cameraHoldButton.hidden = !s.cameraJPEG;
+  showingCamera = false;
   renderStill();
+}
+
+/** Drops the decoded camera rendering (it belongs to one photograph; it is decoded again in a moment if asked for). */
+function releaseCameraBitmap() {
+  if (!cameraBitmap) return;
+  cameraBitmap.bitmap.close();
+  cameraBitmap = null;
+  showingCamera = false;
+}
+
+/** The camera's rendering for `src`, decoded once (the browser applies the JPEG's colour profile) and kept only while
+ *  `src` is the photograph shown; a decode that finishes after the photograph changed is discarded. */
+async function cameraRendering(src: DecodedSource): Promise<ImageBitmap | null> {
+  if (!src.cameraJPEG) return null;
+  if (cameraBitmap?.source === src) return cameraBitmap.bitmap;
+  // The browser decodes it, applies its colour profile and its EXIF orientation (a ProRAW's JPEG is stored in sensor orientation).
+  const bitmap = await createImageBitmap(new Blob([src.cameraJPEG.bytes as BlobPart], { type: 'image/jpeg' }), { imageOrientation: 'from-image' } as ImageBitmapOptions);
+  if (source !== src) { bitmap.close(); return null; }                                    // stale: the photograph changed meanwhile
+  if (cameraBitmap?.source === src) { bitmap.close(); return cameraBitmap.bitmap; }       // another decode of the same one finished first
+  cameraBitmap?.bitmap.close();
+  cameraBitmap = { source: src, bitmap };
+  return bitmap;
+}
+
+/** Hold to see the camera's own rendering; the first hold decodes the JPEG, and the screen follows the hold's state after. */
+async function setCameraHeld(on: boolean) {
+  cameraHeld = on;
+  if (!source?.cameraJPEG || camera) return;
+  if (on && cameraBitmap?.source !== source) {
+    const src = source;
+    let bitmap: ImageBitmap | null = null;
+    try { bitmap = await cameraRendering(src); } catch (e) { info.innerHTML = `<b>The camera's rendering could not be decoded.</b> ${esc((e as Error).message)}`; return; }
+    if (!bitmap || source !== src) return;
+  }
+  if (showingCamera !== cameraHeld) { showingCamera = cameraHeld; scheduleRender(); }
 }
 
 // MARK: the set of photographs
@@ -379,6 +453,7 @@ async function openCamera() {
     setBusy(true);
     camera = await startCamera(video);
     closeLoupe(false);
+    releaseCameraBitmap();
     source = null;
     engine.deleteSource(previewTexture); previewTexture = null;
     fitCanvas(camera.width, camera.height);
@@ -387,6 +462,7 @@ async function openCamera() {
     saveButton.hidden = true;
     captureButton.hidden = false;
     stopCameraButton.hidden = false;
+    cameraHoldButton.hidden = true;
     cameraTimingEV = 0; frameCounter = 0;
     const loop = () => {
       if (!camera) return;
@@ -649,6 +725,8 @@ function applyLinkedLook() {
 window.addEventListener('hashchange', applyLinkedLook);
 showAButton.addEventListener('pointerdown', (e) => { e.preventDefault(); setShowingA(true); });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) showAButton.addEventListener(ev, () => setShowingA(false));
+cameraHoldButton.addEventListener('pointerdown', (e) => { e.preventDefault(); void setCameraHeld(true); });
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) cameraHoldButton.addEventListener(ev, () => void setCameraHeld(false));
 
 // On the image: hold still to compare with the plain decode (after a short delay, so a tap does not flash),
 // double-tap (or double-click) for the loupe, drag inside the loupe to move it.
@@ -698,9 +776,13 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft' && !onSlider) { e.preventDefault(); void showEntry(queueIndex - 1); }
   else if (e.key === 'Escape') { if (batch) batch.cancelled = true; else if (loupe) closeLoupe(); else setLabOpen(false); }
   else if ((e.key === 'a' || e.key === 'A') && !e.repeat) setShowingA(true);
+  else if ((e.key === 'c' || e.key === 'C') && !e.repeat) void setCameraHeld(true);
 });
-window.addEventListener('keyup', (e) => { if (e.key === 'a' || e.key === 'A') setShowingA(false); });
-window.addEventListener('blur', () => { setShowingA(false); endPointer(); });
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'a' || e.key === 'A') setShowingA(false);
+  if (e.key === 'c' || e.key === 'C') void setCameraHeld(false);
+});
+window.addEventListener('blur', () => { setShowingA(false); void setCameraHeld(false); endPointer(); });
 
 // Drag and drop anywhere: files, a selection of files, or a folder.
 for (const ev of ['dragenter', 'dragover']) stage.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('active'); });

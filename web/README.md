@@ -47,6 +47,10 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
   will be. Drag to move the crop (the image around it is uploaded with a margin, so most drags only move
   the window), hold still to compare, double-tap or Escape to leave. Without it the on-screen preview is a
   1600 px copy, which cannot show the diffusion or the key image's fine structure.
+* **The camera's own rendering.** Hold C (or the *Camera's JPEG* button) to see the JPEG the camera embedded
+  in the file: for an Apple ProRAW that is Apple's full-size rendering of the same capture, for most Bayer DNGs
+  a small preview, shown scaled and said so. It is decoded by the browser with its colour profile and shown as
+  it is, never through the engine, so the print can be judged against what the phone would have given.
 * **Pin a look as A.** In the Laboratory, *Pin as A* keeps the current parameters and print exposure;
   then hold the A key (or the *Hold for A* button) to see A against whatever the sliders say now, in
   the preview or in the loupe. A saved JPEG while holding A is the pinned look (`-A` in the file name).
