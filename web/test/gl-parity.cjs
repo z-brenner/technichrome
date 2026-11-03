@@ -44,15 +44,22 @@ const server = http.createServer((req, res) => {
       if (err > worst) { worst = err; worstIndex = i; }
     }
   });
+  // Tiled and windowed rendering must reproduce the whole-image render: a synthetic image printed whole, in 96 px
+  // tiles with their blur halo, and as a crop through a window, compared in float.
+  const tiled = await page.evaluate(() => window.__technichromeTiledCheck(331, 247, 96));
   await browser.close();
   server.close();
   const tolerance = 0.02;
   console.log(`GPU vs Python fixture: worst error ${worst.toFixed(5)} on sample ${worstIndex} (tolerance ${tolerance}); isolation ok; ${errors.length} page errors`);
+  const tiledTolerance = 1e-4;
+  console.log(`tiled vs whole: ${tiled.tiledVsWhole.toExponential(2)} (print, ${tiled.tiles} tiles, halo ${tiled.halo} px), ${tiled.plainTiledVsWhole.toExponential(2)} (plain); crop vs whole: ${tiled.cropVsWhole.toExponential(2)} (tolerance ${tiledTolerance})`);
+  const tiledOk = tiled.tiledVsWhole < tiledTolerance && tiled.plainTiledVsWhole < tiledTolerance && tiled.cropVsWhole < tiledTolerance && tiled.halo > 0 && tiled.tiles === 12;
+  if (!tiledOk) console.log('tiled rendering does not match the whole-image render');
   if (!(worst < tolerance)) {
     for (let i = 0; i < Math.min(6, outputs.length); i++) {
       console.log(`  sample ${i} input ${JSON.stringify(inputs[i])} gpu ${outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${fixture.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
     }
   }
   if (errors.length) console.log(errors.join('\n'));
-  if (!(worst < tolerance) || errors.length) process.exit(1);
+  if (!(worst < tolerance) || !tiledOk || errors.length) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });

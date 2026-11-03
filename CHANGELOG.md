@@ -3,6 +3,13 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 13 — the web bench: 1:1 loupe, tiled export, sets, looks A/B (#14)
+- Double-tap the preview for a loupe: a crop of the full decode at 1:1 on the display, printed with the dye diffusion scaled to the whole image, so the spatial look can be judged before anything is saved.
+- *Save JPEG* develops any size in 1024 px tiles with a blur halo; `test:gl` checks the tiled result and a windowed crop are bitwise identical to a whole-image render (densities fetched by integer texel in the blur and print passes).
+- Drop several files or a folder: a set with ← → and a counter, recent decodes cached up to a memory budget.
+- *Pin as A* in the Laboratory, hold A to compare the pinned look with the current sliders, in the preview or the loupe.
+- The full decode is kept as 16-bit (RAW) or 8-bit (JPEG) codes with a linearisation table instead of floats: half to a quarter of the memory, which is what a 48 MP ProRAW needs to open on a phone.
+
 ## Round 12 — the web version, and the app without Xcode (#12)
 - `web/`: the engine in a browser tab — a TypeScript port of the core tested against the Python fixture, WebGL2 shaders mirroring the Metal kernels (GPU parity checked in headless Chromium in CI), DNGs decoded on the device with LibRaw-wasm using the tuning settings, a camera mode labelled *not RAW*, the Laboratory, JPEG export. Deploys to Cloudflare Pages on every push (`_headers` carries the isolation headers).
 - `.github/workflows/testflight.yml` + `docs/TESTFLIGHT.md`: the app archived, signed and uploaded to TestFlight from CI once four Apple secrets exist.

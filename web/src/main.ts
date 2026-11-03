@@ -1,10 +1,13 @@
-// Technichrome in the browser. One screen: open a photograph or use the camera, see the print, hold to compare,
-// adjust in the Laboratory, save a JPEG. Everything happens in this tab.
+// Technichrome in the browser. One screen: open photographs (one, several, a folder) or use the camera, see the
+// print, hold to compare with the plain decode, double-tap for a 1:1 crop, step through the set with ← →, pin a
+// look as A and hold to compare looks, adjust in the Laboratory, save a JPEG at full resolution. Everything
+// happens in this tab.
 
-import { type EngineParameters, parametersFromJSON } from './engine/parameters';
+import { type EngineParameters, cloneParameters, parametersFromJSON } from './engine/parameters';
 import { geometricMeanLuminance, timingExposureEV } from './engine/timing';
-import { GLEngine, type GLSource } from './gl/engine';
-import { type DecodedSource, decodeFile, downsample, linearFromBitmap } from './raw/decoder';
+import { GLEngine, type GLSource, type SourceWindow } from './gl/engine';
+import { renderTiled } from './gl/tiled';
+import { type DecodedSource, type LinearImage, type StoredImage, decodeFile, downsample, isOpenable, linearFromBitmap, linearRegion, sourceBytes } from './raw/decoder';
 import { startCamera, type CameraSession } from './ui/camera';
 import { buildLab, defaultLabState, type LabState } from './ui/lab';
 import { installParityHook } from './parity';
@@ -12,6 +15,7 @@ import { installParityHook } from './parity';
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const view = $<HTMLCanvasElement>('view');
+const stage = $<HTMLElement>('stage');
 const drop = $<HTMLDivElement>('drop');
 const badge = $<HTMLDivElement>('badge');
 const hint = $<HTMLDivElement>('hint');
@@ -25,6 +29,12 @@ const saveButton = $<HTMLButtonElement>('saveButton');
 const stopCameraButton = $<HTMLButtonElement>('stopCameraButton');
 const fileInput = $<HTMLInputElement>('fileInput');
 const importInput = $<HTMLInputElement>('importInput');
+const queueNav = $<HTMLDivElement>('queueNav');
+const prevButton = $<HTMLButtonElement>('prevButton');
+const nextButton = $<HTMLButtonElement>('nextButton');
+const counter = $<HTMLSpanElement>('counter');
+const pinButton = $<HTMLButtonElement>('pinButton');
+const showAButton = $<HTMLButtonElement>('showAButton');
 
 let engine: GLEngine;
 try {
@@ -47,6 +57,24 @@ let cameraTimingEV = 0;
 let frameCounter = 0;
 let rafHandle = 0;
 
+/** A look pinned as "A": the parameters and print exposure to hold against the current ones. */
+interface Look { parameters: EngineParameters; printExposureEV: number; timingEV: number }
+let pinned: Look | null = null;
+let showingA = false;
+
+/** The photographs opened together, decoded on demand and kept up to a memory budget. */
+interface Entry { file: File; source?: DecodedSource; lastUsed: number }
+let queue: Entry[] = [];
+let queueIndex = -1;
+let openSerial = 0;
+let useClock = 0;
+const CACHE_BUDGET_BYTES = 700e6;
+
+/** The loupe: a crop of the full decode shown 1:1 in device pixels, uploaded with the widest halo the blur can need. */
+const LOUPE_HALO = 32;
+const LOUPE_MAX_EDGE = 4096;
+let loupe: { crop: SourceWindow; region: SourceWindow; texture: GLSource } | null = null;
+
 buildLab(labBody, state, () => scheduleRender());
 installParityHook(engine);
 
@@ -58,39 +86,72 @@ function exposureScaleFor(p: EngineParameters, baselineEV: number, extraEV: numb
   return Math.pow(2, p.exposureEV + baselineEV + extraEV);
 }
 
+/** The look being shown: A while it is held, otherwise the Laboratory's. */
+function look(): Look {
+  if (showingA && pinned) return pinned;
+  return { parameters: state.parameters, printExposureEV: state.printExposureEV, timingEV };
+}
+
+function fmtEV(v: number): string { return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)} EV`; }
+
 function describe(): string {
   if (camera && !source) return `<b>Camera</b> · ${camera.width}×${camera.height} · not RAW: the browser's own processed stream, linearised from sRGB · timed ${fmtEV(cameraTimingEV)}`;
   if (!source) return 'Open a photograph to begin.';
-  const parts = [`<b>${source.label}</b>`];
+  const L = look();
+  const parts: string[] = [];
+  if (queueIndex >= 0 && queue[queueIndex]?.source === source && queue.length > 1) parts.push(`<b>${queueIndex + 1} / ${queue.length}</b>`);
+  parts.push(`<b>${source.label}</b>`);
   if (source.cameraModel) parts.push(source.cameraModel);
   parts.push(`${source.full.width}×${source.full.height}`);
   if (source.iso) parts.push(`ISO ${source.iso.toFixed(0)}`);
   if (source.shutter) parts.push(source.shutter >= 1 ? `${source.shutter.toFixed(1)} s` : `1/${(1 / source.shutter).toFixed(0)} s`);
   if (source.baselineEV) parts.push(`baseline ${fmtEV(source.baselineEV)}`);
-  parts.push(`timed ${fmtEV(timingEV)}`);
-  parts.push(`print ${fmtEV(state.printExposureEV)}`);
+  parts.push(`timed ${fmtEV(L.timingEV)}`);
+  parts.push(`print ${fmtEV(L.printExposureEV)}`);
   parts.push(`decoded in ${(source.decodeMs / 1000).toFixed(1)} s`);
   if (source.kind === 'display') parts.push('developed as display-referred data');
+  if (loupe) parts.push(`1:1 crop at ${loupe.crop.x},${loupe.crop.y}`);
+  if (showingA && pinned) parts.push(`<b>showing A · ${pinned.parameters.name}</b>`);
   return parts.join(' · ');
 }
 
-function fmtEV(v: number): string { return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)} EV`; }
+function updateHint() {
+  const bits = ['hold to compare with the plain decode', loupe ? 'double-tap to leave 1:1' : 'double-tap for 1:1'];
+  if (queue.length > 1) bits.push('← → for the next photograph');
+  if (pinned) bits.push('hold A for the pinned look');
+  hint.textContent = bits.join(' · ');
+}
 
-function fitCanvas(width: number, height: number) {
+function fitCanvas(width: number, height: number, oneToOne = false) {
   view.width = width;
   view.height = height;
   view.hidden = false;
   drop.hidden = true;
+  view.classList.toggle('loupe', oneToOne);
+  if (oneToOne) {
+    const dpr = window.devicePixelRatio || 1;
+    view.style.width = `${width / dpr}px`;
+    view.style.height = `${height / dpr}px`;
+  } else {
+    view.style.width = '';
+    view.style.height = '';
+  }
 }
 
 // MARK: rendering
 
 function renderStill() {
-  if (!source || !previewTexture) return;
-  const p = state.parameters;
-  const scale = exposureScaleFor(p, source.baselineEV, state.printExposureEV + timingEV);
-  if (comparing) engine.renderPlain(previewTexture, scale, output);
-  else engine.render(previewTexture, p, { exposureScale: scale, spatial: true, output });
+  if (!source) return;
+  const L = look();
+  const scale = exposureScaleFor(L.parameters, source.baselineEV, L.printExposureEV + L.timingEV);
+  if (loupe) {
+    const window: SourceWindow = { x: loupe.crop.x - loupe.region.x, y: loupe.crop.y - loupe.region.y, width: loupe.crop.width, height: loupe.crop.height };
+    if (comparing) engine.renderPlain(loupe.texture, scale, output, null, window);
+    else engine.render(loupe.texture, L.parameters, { exposureScale: scale, spatial: true, output, longEdge: Math.max(source.full.width, source.full.height), window });
+  } else if (previewTexture) {
+    if (comparing) engine.renderPlain(previewTexture, scale, output);
+    else engine.render(previewTexture, L.parameters, { exposureScale: scale, spatial: true, output });
+  }
   info.innerHTML = describe();
 }
 
@@ -102,39 +163,147 @@ function scheduleRender() {
   requestAnimationFrame(() => { renderQueued = false; renderStill(); });
 }
 
-function measureTiming(src: DecodedSource): number {
-  const p = state.parameters;
+function measureTiming(src: DecodedSource, p: EngineParameters): number {
   const gm = geometricMeanLuminance(src.preview.rgb, src.preview.width, src.preview.height, exposureScaleFor(p, src.baselineEV, 0), 2);
   return timingExposureEV(gm, p.timingTarget, p.timingStrength, p.timingLimit, 0);
 }
 
+function remeasure() {
+  if (!source) return;
+  timingEV = measureTiming(source, state.parameters);
+  if (pinned) pinned.timingEV = measureTiming(source, pinned.parameters);
+}
+
 async function showSource(s: DecodedSource) {
   stopCamera();
+  closeLoupe(false);
   engine.deleteSource(previewTexture);
   source = s;
-  timingEV = measureTiming(s);
+  remeasure();
   previewTexture = engine.uploadLinear(s.preview.rgb, s.preview.width, s.preview.height);
   fitCanvas(s.preview.width, s.preview.height);
   badge.hidden = false;
   badge.textContent = s.kind === 'display' ? 'not raw · display-referred' : s.label;
   badge.classList.toggle('warn', s.kind === 'display');
   hint.hidden = false;
+  updateHint();
   saveButton.hidden = false;
   captureButton.hidden = true;
   stopCameraButton.hidden = true;
   renderStill();
 }
 
-async function openFile(file: File) {
-  setBusy(true);
-  try {
-    const decoded = await decodeFile(file);
-    await showSource(decoded);
-  } catch (e) {
-    info.innerHTML = `<b>Could not open ${file.name}.</b> ${(e as Error).message}`;
-  } finally {
-    setBusy(false);
+// MARK: the set of photographs
+
+function updateQueueNav() {
+  queueNav.hidden = queue.length < 2;
+  prevButton.disabled = queueIndex <= 0;
+  nextButton.disabled = queueIndex >= queue.length - 1;
+  counter.textContent = queue.length ? `${queueIndex + 1} / ${queue.length}` : '';
+}
+
+/** Drops decoded sources least recently shown until the cache fits the budget (the current one always stays). */
+function evictCache() {
+  const cached = queue.filter((e, i) => e.source && i !== queueIndex).sort((a, b) => a.lastUsed - b.lastUsed);
+  let total = queue.reduce((sum, e) => sum + (e.source ? sourceBytes(e.source) : 0), 0);
+  for (const e of cached) {
+    if (total <= CACHE_BUDGET_BYTES) break;
+    total -= sourceBytes(e.source!);
+    delete e.source;
   }
+}
+
+async function showEntry(index: number) {
+  if (index < 0 || index >= queue.length) return;
+  const serial = ++openSerial;
+  queueIndex = index;
+  updateQueueNav();
+  const entry = queue[index];
+  if (!entry.source) {
+    setBusy(true);
+    try {
+      const decoded = await decodeFile(entry.file);
+      entry.source = decoded;
+    } catch (e) {
+      if (serial === openSerial) info.innerHTML = `<b>Could not open ${entry.file.name}.</b> ${(e as Error).message}`;
+      return;
+    } finally {
+      if (serial === openSerial) setBusy(false);
+    }
+    if (serial !== openSerial) { evictCache(); return; }   // the user has moved on; keep the decode for later
+  }
+  entry.lastUsed = ++useClock;
+  evictCache();
+  await showSource(entry.source);
+}
+
+/** Opens a set of files as the new queue (sorted by name) and shows the first. A single file is always tried. */
+async function openFiles(files: File[]) {
+  const list = files.length === 1 ? files : files.filter((f) => isOpenable(f.name));
+  if (!list.length) { info.innerHTML = '<b>Nothing to open.</b> Drop DNGs (or any RAW LibRaw reads), JPEGs or PNGs.'; return; }
+  list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  queue = list.map((file) => ({ file, lastUsed: 0 }));
+  queueIndex = -1;
+  await showEntry(0);
+}
+
+/** Files from a drop, descending into dropped folders (up to a few hundred files). */
+function filesFromDrop(dt: DataTransfer): Promise<File[]> {
+  const entries = Array.from(dt.items ?? []).map((it) => (it as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.() ?? null).filter((e): e is FileSystemEntry => !!e);
+  if (!entries.some((e) => e.isDirectory)) return Promise.resolve(Array.from(dt.files));
+  const out: File[] = [];
+  const walk = async (entry: FileSystemEntry): Promise<void> => {
+    if (out.length >= 500) return;
+    if (entry.isFile) {
+      const f = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
+      if (isOpenable(f.name)) out.push(f);
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      for (;;) {
+        const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
+        if (!batch.length) break;
+        for (const e of batch) await walk(e);
+      }
+    }
+  };
+  return (async () => { for (const e of entries) await walk(e); return out; })();
+}
+
+// MARK: the loupe
+
+/** Opens a 1:1 crop of the full decode around a point of the canvas (CSS pixels relative to it). */
+function openLoupe(cssX: number, cssY: number) {
+  if (!source || camera) return;
+  const full = source.full;
+  const px = cssX * view.width / Math.max(1, view.clientWidth), py = cssY * view.height / Math.max(1, view.clientHeight);
+  const fx = px * full.width / source.preview.width, fy = py * full.height / source.preview.height;
+  const dpr = window.devicePixelRatio || 1;
+  const maxEdge = Math.min(LOUPE_MAX_EDGE, engine.maxTextureSize - 2 * LOUPE_HALO);
+  const width = Math.max(32, Math.min(full.width, maxEdge, Math.round((stage.clientWidth - 32) * dpr)));
+  const height = Math.max(32, Math.min(full.height, maxEdge, Math.round((stage.clientHeight - 32) * dpr)));
+  const crop: SourceWindow = {
+    x: Math.max(0, Math.min(full.width - width, Math.round(fx - width / 2))),
+    y: Math.max(0, Math.min(full.height - height, Math.round(fy - height / 2))),
+    width, height,
+  };
+  const region = linearRegion(full, crop.x - LOUPE_HALO, crop.y - LOUPE_HALO, crop.width + 2 * LOUPE_HALO, crop.height + 2 * LOUPE_HALO);
+  const texture = engine.uploadLinear(region.rgb, region.width, region.height, loupe?.texture);
+  loupe = { crop, region: { x: region.x, y: region.y, width: region.width, height: region.height }, texture };
+  fitCanvas(crop.width, crop.height, true);
+  badge.textContent = `${source.kind === 'display' ? 'not raw · display-referred' : source.label} · 1:1`;
+  updateHint();
+  renderStill();
+}
+
+function closeLoupe(rerender = true) {
+  if (!loupe) return;
+  engine.deleteSource(loupe.texture);
+  loupe = null;
+  if (!source || !rerender) return;
+  fitCanvas(source.preview.width, source.preview.height);
+  badge.textContent = source.kind === 'display' ? 'not raw · display-referred' : source.label;
+  updateHint();
+  renderStill();
 }
 
 // MARK: camera
@@ -148,6 +317,7 @@ async function openCamera() {
   try {
     setBusy(true);
     camera = await startCamera(video);
+    closeLoupe(false);
     source = null;
     engine.deleteSource(previewTexture); previewTexture = null;
     fitCanvas(camera.width, camera.height);
@@ -163,7 +333,8 @@ async function openCamera() {
       if (video.readyState < 2) return;
       cameraTexture = engine.uploadFrame(video, camera.width, camera.height, cameraTexture ?? undefined);
       frameCounter++;
-      const p = state.parameters;
+      const L = look();
+      const p = L.parameters;
       if (p.timingStrength > 0 && frameCounter % 12 === 1) {
         // Print timing from a small linearised copy of the frame, smoothed like the app's preview.
         const small = linearFromBitmap(video, 'frame');
@@ -173,7 +344,7 @@ async function openCamera() {
       } else if (p.timingStrength <= 0) {
         cameraTimingEV = 0;
       }
-      const scale = exposureScaleFor(p, 0, state.printExposureEV + cameraTimingEV);
+      const scale = exposureScaleFor(p, 0, L.printExposureEV + cameraTimingEV);
       if (comparing) engine.renderPlain(cameraTexture, scale, output);
       else engine.render(cameraTexture, p, { exposureScale: scale, spatial: false, output });
       if (frameCounter % 15 === 0) info.innerHTML = describe();
@@ -206,40 +377,52 @@ async function photograph() {
 
 // MARK: saving
 
+/** Develops `image` tile by tile into a canvas of its size and encodes a JPEG. Throws when the browser refuses the size. */
+async function developToBlob(image: StoredImage | LinearImage, p: EngineParameters, exposureScale: number): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width; canvas.height = image.height;
+  const ctx = canvas.getContext('2d', output === 'displayP3' ? ({ colorSpace: 'display-p3' } as CanvasRenderingContext2DSettings) : undefined);
+  if (!ctx) throw new Error(`could not create a ${image.width}×${image.height} canvas`);
+  await renderTiled(engine, image, {
+    parameters: p, exposureScale, output, spatial: true,
+    onTile: (pixels, t) => {
+      const px = pixels as Uint8ClampedArray<ArrayBuffer>;
+      const data = output === 'displayP3' ? new ImageData(px, t.width, t.height, { colorSpace: 'display-p3' } as ImageDataSettings) : new ImageData(px, t.width, t.height);
+      ctx.putImageData(data, t.x, t.y);
+    },
+    onProgress: (done, total) => { if (total > 1) info.innerHTML = `${describe()} · <b>developing ${done} / ${total}</b>`; },
+  });
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+  if (!blob) throw new Error('JPEG encoding failed');
+  return blob;
+}
+
 async function saveJPEG() {
   if (!source) return;
   setBusy(true);
   try {
-    const p = state.parameters;
+    const L = look();
     const full = source.full;
-    const maxEdge = engine.maxTextureSize;
-    let img = full;
+    const scale = exposureScaleFor(L.parameters, source.baselineEV, L.printExposureEV + L.timingEV);
+    let image: StoredImage | LinearImage = full;
     let note = '';
-    if (Math.max(full.width, full.height) > maxEdge) {
-      img = downsample(full, maxEdge);
-      note = ` (reduced to ${img.width}×${img.height}: this GPU's texture limit)`;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const blob = await developToBlob(image, L.parameters, scale);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `Technichrome-${source.fileName.replace(/\.[^.]+$/, '')}${showingA && pinned ? '-A' : ''}.jpg`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+        info.innerHTML = `${describe()} · <b>saved ${image.width}×${image.height}${note}</b>`;
+        return;
+      } catch (e) {
+        // Phones cap 2D canvases at around 16 megapixels and GPUs their textures: halve the size and try again.
+        if (attempt >= 3 || Math.max(image.width, image.height) <= 2048) throw e;
+        image = downsample(full, Math.ceil(Math.max(image.width, image.height) / 2));
+        note = ` (reduced to ${image.width}×${image.height}: this browser could not produce the full size)`;
+      }
     }
-    const tex = engine.uploadLinear(img.rgb, img.width, img.height);
-    const target = engine.createByteTarget(img.width, img.height);
-    const scale = exposureScaleFor(p, source.baselineEV, state.printExposureEV + timingEV);
-    engine.render(tex, p, { exposureScale: scale, spatial: true, output, target });
-    const pixels = engine.readBytes(target);
-    engine.deleteTarget(target);
-    engine.deleteSource(tex);
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width; canvas.height = img.height;
-    const ctx = canvas.getContext('2d', output === 'displayP3' ? ({ colorSpace: 'display-p3' } as CanvasRenderingContext2DSettings) : undefined);
-    if (!ctx) throw new Error('could not create a canvas for the JPEG');
-    const imageData = output === 'displayP3' ? new ImageData(pixels, img.width, img.height, { colorSpace: 'display-p3' } as ImageDataSettings) : new ImageData(pixels, img.width, img.height);
-    ctx.putImageData(imageData, 0, 0);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
-    if (!blob) throw new Error('JPEG encoding failed');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Technichrome-${source.fileName.replace(/\.[^.]+$/, '')}.jpg`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    info.innerHTML = `${describe()} · <b>saved ${img.width}×${img.height}${note}</b>`;
   } catch (e) {
     info.innerHTML = `<b>Could not save.</b> ${(e as Error).message}`;
   } finally {
@@ -247,21 +430,40 @@ async function saveJPEG() {
   }
 }
 
+// MARK: looks A and B
+
+function pinLook() {
+  pinned = { parameters: cloneParameters(state.parameters), printExposureEV: state.printExposureEV, timingEV };
+  pinButton.textContent = 'Re-pin as A';
+  showAButton.hidden = false;
+  updateHint();
+  info.innerHTML = `${describe()} · <b>pinned the current look as A</b>`;
+}
+
+function setShowingA(on: boolean) {
+  if (!pinned || showingA === on) return;
+  showingA = on;
+  scheduleRender();
+  if (camera) info.innerHTML = describe();
+}
+
 // MARK: wiring
 
 $<HTMLButtonElement>('openButton').addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => { const f = fileInput.files?.[0]; if (f) void openFile(f); fileInput.value = ''; });
+fileInput.addEventListener('change', () => { const files = Array.from(fileInput.files ?? []); fileInput.value = ''; if (files.length) void openFiles(files); });
 $<HTMLButtonElement>('cameraButton').addEventListener('click', () => void openCamera());
 stopCameraButton.addEventListener('click', () => { stopCamera(); if (!source) { view.hidden = true; drop.hidden = false; badge.hidden = true; } info.innerHTML = describe(); });
 captureButton.addEventListener('click', () => void photograph());
 saveButton.addEventListener('click', () => void saveJPEG());
+prevButton.addEventListener('click', () => void showEntry(queueIndex - 1));
+nextButton.addEventListener('click', () => void showEntry(queueIndex + 1));
 $<HTMLButtonElement>('labButton').addEventListener('click', () => { lab.hidden = !lab.hidden; });
 $<HTMLButtonElement>('labClose').addEventListener('click', () => { lab.hidden = true; });
 $<HTMLButtonElement>('resetButton').addEventListener('click', () => {
   const fresh = defaultLabState();
   state.parameters = fresh.parameters; state.printExposureEV = 0;
   buildLab(labBody, state, () => scheduleRender());
-  if (source) timingEV = measureTiming(source);
+  remeasure();
   scheduleRender();
 });
 $<HTMLButtonElement>('exportButton').addEventListener('click', () => {
@@ -279,29 +481,64 @@ importInput.addEventListener('change', async () => {
   try {
     state.parameters = parametersFromJSON(JSON.parse(await f.text()));
     buildLab(labBody, state, () => scheduleRender());
-    if (source) timingEV = measureTiming(source);
+    remeasure();
     scheduleRender();
   } catch (e) {
     info.innerHTML = `<b>Could not import ${f.name}.</b> ${(e as Error).message}`;
   }
 });
+pinButton.addEventListener('click', pinLook);
+showAButton.addEventListener('pointerdown', (e) => { e.preventDefault(); setShowingA(true); });
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) showAButton.addEventListener(ev, () => setShowingA(false));
 
-// Hold to compare with the plain decode.
-const startCompare = (e: Event) => { e.preventDefault(); comparing = true; scheduleRender(); };
-const endCompare = () => { if (!comparing) return; comparing = false; scheduleRender(); };
-view.addEventListener('pointerdown', startCompare);
-view.addEventListener('pointerup', endCompare);
-view.addEventListener('pointercancel', endCompare);
-view.addEventListener('pointerleave', endCompare);
+// On the image: hold to compare with the plain decode (after a short delay, so a tap does not flash),
+// double-tap (or double-click) for the loupe.
+let compareTimer = 0;
+let lastTap = { time: 0, x: 0, y: 0 };
+const endCompare = () => { window.clearTimeout(compareTimer); if (!comparing) return; comparing = false; scheduleRender(); };
+view.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const now = performance.now();
+  const double = now - lastTap.time < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30;
+  lastTap = { time: double ? 0 : now, x: e.clientX, y: e.clientY };
+  if (double) {
+    endCompare();
+    if (loupe) closeLoupe();
+    else { const r = view.getBoundingClientRect(); openLoupe(e.clientX - r.left, e.clientY - r.top); }
+    return;
+  }
+  window.clearTimeout(compareTimer);
+  compareTimer = window.setTimeout(() => { comparing = true; scheduleRender(); }, 180);
+});
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) view.addEventListener(ev, endCompare);
 view.addEventListener('contextmenu', (e) => e.preventDefault());
+view.addEventListener('dblclick', (e) => e.preventDefault());
 
-// Drag and drop anywhere.
-const stage = $<HTMLElement>('stage');
+// Keys: ← → through the set, Escape leaves the loupe (then closes the Laboratory), A held shows the pinned look.
+// A focused slider keeps its arrow keys; A and Escape work there too, so a look can be compared mid-adjustment.
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if (t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && t.type !== 'range')) return;
+  const onSlider = t instanceof HTMLInputElement;
+  if (e.key === 'ArrowRight' && !onSlider) { e.preventDefault(); void showEntry(queueIndex + 1); }
+  else if (e.key === 'ArrowLeft' && !onSlider) { e.preventDefault(); void showEntry(queueIndex - 1); }
+  else if (e.key === 'Escape') { if (loupe) closeLoupe(); else lab.hidden = true; }
+  else if ((e.key === 'a' || e.key === 'A') && !e.repeat) setShowingA(true);
+});
+window.addEventListener('keyup', (e) => { if (e.key === 'a' || e.key === 'A') setShowingA(false); });
+window.addEventListener('blur', () => { setShowingA(false); endCompare(); });
+
+// Drag and drop anywhere: files, a selection of files, or a folder.
 for (const ev of ['dragenter', 'dragover']) stage.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('active'); });
 for (const ev of ['dragleave', 'drop']) stage.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('active'); });
-stage.addEventListener('drop', (e) => { const f = (e as DragEvent).dataTransfer?.files?.[0]; if (f) void openFile(f); });
+stage.addEventListener('drop', (e) => {
+  const dt = (e as DragEvent).dataTransfer;
+  if (!dt) return;
+  void filesFromDrop(dt).then((files) => { if (files.length) return openFiles(files); });
+});
 
 // Timing depends on the parameters, so re-measure when the Laboratory changes them.
-labBody.addEventListener('input', () => { if (source) timingEV = measureTiming(source); });
+labBody.addEventListener('input', remeasure);
 
 info.innerHTML = describe();

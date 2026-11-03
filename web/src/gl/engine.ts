@@ -19,6 +19,9 @@ export interface GLSource {
   encoded: boolean;
 }
 
+/** A rectangle of a source texture in its pixels, from the top left. */
+export interface SourceWindow { x: number; y: number; width: number; height: number }
+
 export interface RenderOptions {
   exposureScale: number;
   /** Run the spatial stage (dye diffusion). */
@@ -27,6 +30,19 @@ export interface RenderOptions {
   output: OutputMode;
   /** Render into this framebuffer (null = the canvas). */
   target?: { framebuffer: WebGLFramebuffer; width: number; height: number } | null;
+  /** Long edge of the whole image this source is part of, which sets the spatial scale (default: the source's own). */
+  longEdge?: number;
+  /** The part of the source to print (default: all of it). The target should have the window's size. */
+  window?: SourceWindow;
+}
+
+/** The dye-diffusion kernel for an image of this long edge: σ in pixels and the radius the blur actually runs
+ *  (0 when the blur is skipped). σ is specified for a 4000 px long edge and scales with the size rendered, as in
+ *  the app; the radius is what a tile needs as a halo to print exactly like the whole image. */
+export function diffusionKernel(p: EngineParameters, longEdge: number, spatial: boolean): { sigmaPx: number; radius: number } {
+  const sigmaPx = spatial ? p.diffusionSigmaAt4K * longEdge / 4000 : 0;
+  if (!(sigmaPx > 0.15)) return { sigmaPx: 0, radius: 0 };
+  return { sigmaPx, radius: Math.min(32, Math.ceil(sigmaPx * 3)) };
 }
 
 interface Program { program: WebGLProgram; uniforms: Record<string, WebGLUniformLocation | null> }
@@ -70,9 +86,9 @@ export class GLEngine {
     } catch { p3 = false; }
     this.supportsP3Canvas = p3;
     this.separate = this.compile(SEPARATE_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uSepR', 'uSepG', 'uSepB', 'uNeg', 'uNegShape', 'uMat', 'uDyeDMax', 'uDyeGain', 'uDyeLight', 'uDyeMask']);
-    this.blur = this.compile(BLUR_FRAG, ['uImage', 'uStep', 'uWeights', 'uRadius']);
-    this.print = this.compile(PRINT_FRAG, ['uDensities', 'uSource', 'uCube', 'uCubeDim', 'uEncoded', 'uExposureScale', 'uSepG', 'uNeg', 'uNegShape', 'uKey', 'uKeyNu', 'uSurround', 'uFlare', 'uOutput', 'uP3ToSRGB']);
-    this.plain = this.compile(PLAIN_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uOutput', 'uSRGBToP3']);
+    this.blur = this.compile(BLUR_FRAG, ['uImage', 'uAxis', 'uWeights', 'uRadius']);
+    this.print = this.compile(PRINT_FRAG, ['uDensities', 'uSource', 'uCube', 'uCubeDim', 'uEncoded', 'uExposureScale', 'uSepG', 'uNeg', 'uNegShape', 'uKey', 'uKeyNu', 'uSurround', 'uFlare', 'uOutput', 'uP3ToSRGB', 'uUVOrigin', 'uUVScale', 'uWindowOrigin']);
+    this.plain = this.compile(PLAIN_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uOutput', 'uSRGBToP3', 'uUVOrigin', 'uUVScale']);
     const vao = gl.createVertexArray();
     if (!vao) throw new Error('could not create a vertex array');
     this.vao = vao;
@@ -101,10 +117,10 @@ export class GLEngine {
 
   // MARK: sources
 
-  /** Uploads scene-linear RGB float data (3 floats per pixel, sRGB primaries). */
-  uploadLinear(rgb: Float32Array, width: number, height: number): GLSource {
+  /** Uploads scene-linear RGB float data (3 floats per pixel, sRGB primaries), into `existing`'s texture when given. */
+  uploadLinear(rgb: Float32Array, width: number, height: number, existing?: GLSource): GLSource {
     const gl = this.gl;
-    const tex = gl.createTexture();
+    const tex = existing?.texture ?? gl.createTexture();
     if (!tex) throw new Error('could not create a texture');
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -202,6 +218,12 @@ export class GLEngine {
     this.gl.deleteTexture(t.texture);
   }
 
+  /** Frees the scratch targets (after a tiled export, so the GPU memory is not kept at the tile size). */
+  releaseScratch() {
+    for (const s of this.ping) { if (s) { this.gl.deleteTexture(s.tex); this.gl.deleteFramebuffer(s.fb); } }
+    this.ping = [];
+  }
+
   private scratch(index: number, w: number, h: number) {
     const gl = this.gl;
     const existing = this.ping[index];
@@ -242,6 +264,12 @@ export class GLEngine {
     gl.viewport(0, 0, w, h);
   }
 
+  /** UV origin and scale that map the viewport onto `window` of a source (GL's V runs upward; row 0 is the top). */
+  private windowUV(sw: number, sh: number, window: SourceWindow | undefined): [number, number, number, number] {
+    if (!window) return [0, 0, 1, 1];
+    return [window.x / sw, (sh - window.y - window.height) / sh, window.width / sw, window.height / sh];
+  }
+
   /** The Technichrome print of `source`, into the canvas or `opts.target`. */
   render(source: GLSource, p: EngineParameters, opts: RenderOptions) {
     this.prepare(p);
@@ -276,11 +304,10 @@ export class GLEngine {
     this.draw('separate');
 
     // Pass 2 (optional): dye diffusion in the gelatin, a separable Gaussian on the densities. The key stays sharp.
-    // σ is specified for a 4000 px long edge and scales with the size actually rendered, as in the app.
+    // σ follows the whole image's long edge (a tile or a crop of a larger image blurs like the whole).
     let densities = dens.tex;
-    const sigmaPx = opts.spatial ? p.diffusionSigmaAt4K * Math.max(sw, sh) / 4000 : 0;
-    if (sigmaPx > 0.15) {
-      const radius = Math.min(32, Math.ceil(sigmaPx * 3));
+    const { sigmaPx, radius } = diffusionKernel(p, opts.longEdge ?? Math.max(sw, sh), opts.spatial);
+    if (radius > 0) {
       const weights = new Float32Array(33);
       let sum = 0;
       for (let i = 0; i <= radius; i++) { weights[i] = Math.exp(-0.5 * (i * i) / (sigmaPx * sigmaPx)); sum += i === 0 ? weights[i] : 2 * weights[i]; }
@@ -293,11 +320,11 @@ export class GLEngine {
       gl.uniform1i(b.uRadius, radius);
       this.bindTarget(tmp.fb, sw, sh);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, dens.tex); gl.uniform1i(b.uImage, 0);
-      gl.uniform2f(b.uStep, 1 / sw, 0);
+      gl.uniform2i(b.uAxis, 1, 0);
       this.draw('blur x');
       this.bindTarget(out.fb, sw, sh);
       gl.bindTexture(gl.TEXTURE_2D, tmp.tex);
-      gl.uniform2f(b.uStep, 0, 1 / sh);
+      gl.uniform2i(b.uAxis, 0, 1);
       this.draw('blur y');
       densities = out.tex;
     }
@@ -321,12 +348,16 @@ export class GLEngine {
     gl.uniform1f(q.uFlare, p.screenFlare);
     gl.uniform1i(q.uOutput, opts.output === 'linearP3' ? 2 : opts.output === 'displayP3' ? 1 : 0);
     gl.uniformMatrix3fv(q.uP3ToSRGB, true, P3_TO_SRGB);
+    const [ox, oy, sx, sy] = this.windowUV(sw, sh, opts.window);
+    gl.uniform2f(q.uUVOrigin, ox, oy);
+    gl.uniform2f(q.uUVScale, sx, sy);
+    gl.uniform2i(q.uWindowOrigin, opts.window ? opts.window.x : 0, opts.window ? sh - opts.window.y - opts.window.height : 0);
     this.draw('print');
     gl.activeTexture(gl.TEXTURE0);
   }
 
   /** The plain scene (exposure only), for the hold-to-compare view. */
-  renderPlain(source: GLSource, exposureScale: number, output: OutputMode, target?: { framebuffer: WebGLFramebuffer; width: number; height: number } | null) {
+  renderPlain(source: GLSource, exposureScale: number, output: OutputMode, target?: { framebuffer: WebGLFramebuffer; width: number; height: number } | null, window?: SourceWindow) {
     const gl = this.gl;
     const tw = target ? target.width : this.canvas.width;
     const th = target ? target.height : this.canvas.height;
@@ -338,17 +369,24 @@ export class GLEngine {
     gl.uniform1f(u.uExposureScale, exposureScale);
     gl.uniform1i(u.uOutput, output === 'displayP3' ? 1 : 0);
     gl.uniformMatrix3fv(u.uSRGBToP3, true, SRGB_TO_P3);
+    const [ox, oy, sx, sy] = this.windowUV(source.width, source.height, window);
+    gl.uniform2f(u.uUVOrigin, ox, oy);
+    gl.uniform2f(u.uUVScale, sx, sy);
     this.draw('plain');
   }
 
-  /** Reads a float target back (RGBA32F). */
-  readFloat(target: { framebuffer: WebGLFramebuffer; width: number; height: number }): Float32Array {
+  /** Reads a float target back (RGBA32F), in GL order (bottom row first) or flipped to rows top to bottom. */
+  readFloat(target: { framebuffer: WebGLFramebuffer; width: number; height: number }, topDown = false): Float32Array {
     const gl = this.gl;
     const out = new Float32Array(target.width * target.height * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
     gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.FLOAT, out);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return out;
+    if (!topDown) return out;
+    const w = target.width * 4, h = target.height;
+    const flipped = new Float32Array(out.length);
+    for (let y = 0; y < h; y++) flipped.set(out.subarray(y * w, (y + 1) * w), (h - 1 - y) * w);
+    return flipped;
   }
 
   /** Reads an 8-bit target back (RGBA8), rows top to bottom. */

@@ -91,20 +91,23 @@ void main() {
   outColor = vec4(dye, 1.0);
 }`;
 
+// Densities are fetched by integer texel (texelFetch), never filtered: the sums are then the same floats in
+// the same order whatever the texture's size, so a tile with its halo blurs bitwise like the whole image.
 export const BLUR_FRAG = `#version 300 es
 ${COMMON}
 uniform sampler2D uImage;
-uniform vec2 uStep;            // one texel along the blur axis
+uniform ivec2 uAxis;           // (1, 0) or (0, 1): the blur axis
 uniform float uWeights[33];    // symmetric Gaussian, centre first
 uniform int uRadius;
-in vec2 vUV;
 out vec4 outColor;
 void main() {
-  vec3 acc = texture(uImage, vUV).rgb * uWeights[0];
+  ivec2 last = textureSize(uImage, 0) - 1;
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  vec3 acc = texelFetch(uImage, c, 0).rgb * uWeights[0];
   for (int i = 1; i <= 32; i++) {
     if (i > uRadius) break;
-    vec2 o = uStep * float(i);
-    acc += (texture(uImage, vUV + o).rgb + texture(uImage, vUV - o).rgb) * uWeights[i];
+    ivec2 o = uAxis * i;
+    acc += (texelFetch(uImage, clamp(c + o, ivec2(0), last), 0).rgb + texelFetch(uImage, clamp(c - o, ivec2(0), last), 0).rgb) * uWeights[i];
   }
   outColor = vec4(acc, 1.0);
 }`;
@@ -126,10 +129,14 @@ uniform float uSurround;
 uniform float uFlare;
 uniform int uOutput;        // 0 = sRGB display (encoded), 1 = Display P3 canvas (encoded), 2 = linear P3 floats
 uniform mat3 uP3ToSRGB;
+uniform vec2 uUVOrigin;     // the part of the source this viewport prints (a tile or crop of a larger image)
+uniform vec2 uUVScale;
+uniform ivec2 uWindowOrigin; // the same window in density texels
 in vec2 vUV;
 out vec4 outColor;
 void main() {
-  vec3 dye = clamp(texture(uDensities, vUV).rgb, 0.0, 1.0);
+  vec2 uv = uUVOrigin + vUV * uUVScale;
+  vec3 dye = clamp(texelFetch(uDensities, ivec2(gl_FragCoord.xy) + uWindowOrigin, 0).rgb, 0.0, 1.0);
   // The same trilinear interpolation as the CIColorCube and the CPU reference, done by hand with texelFetch so
   // the float cube needs no filtering extension (sampling a float texture with LINEAR is not core WebGL2).
   float n = uCubeDim - 1.0;
@@ -147,7 +154,7 @@ void main() {
   }
   c = clamp(c, 0.0, 1.0);
   // Silver key image from the green record of the unblurred source.
-  vec3 e = sceneLinear(uSource, vUV, uEncoded, uExposureScale);
+  vec3 e = sceneLinear(uSource, uv, uEncoded, uExposureScale);
   float g = dot(uSepG, e);
   float dn = tcCurve(log10f(max(g, 1e-6)), uNeg.x, uNeg.y, uNeg.z, uNeg.w, uNegShape.x, uNegShape.y);
   float k = tcCurve(-dn, uKey.x, uKey.y, 0.0, uKey.z, uKey.w, uKeyNu);
@@ -166,10 +173,12 @@ uniform int uEncoded;
 uniform float uExposureScale;
 uniform int uOutput;        // 0 = sRGB display, 1 = P3 canvas (source is sRGB-primaries linear, so convert)
 uniform mat3 uSRGBToP3;
+uniform vec2 uUVOrigin;
+uniform vec2 uUVScale;
 in vec2 vUV;
 out vec4 outColor;
 void main() {
-  vec3 e = sceneLinear(uSource, vUV, uEncoded, uExposureScale);
+  vec3 e = sceneLinear(uSource, uUVOrigin + vUV * uUVScale, uEncoded, uExposureScale);
   if (uOutput == 1) e = uSRGBToP3 * e;
   outColor = vec4(srgbEncode(e), 1.0);
 }`;
