@@ -133,6 +133,32 @@ function updateHint() {
   hint.textContent = bits.join(' · ');
 }
 
+/** Shows or hides the Laboratory. On phones it is a sheet over the lower screen: the stage then pads its bottom by
+ *  exactly the overlap, so a picture of any shape fits above the sheet. */
+function setLabOpen(open: boolean) {
+  lab.hidden = !open;
+  makeRoomForSheet();
+}
+
+function makeRoomForSheet() {
+  let padding = '';
+  if (!lab.hidden && getComputedStyle(lab).position === 'fixed') {
+    const overlap = stage.getBoundingClientRect().bottom - lab.getBoundingClientRect().top;
+    if (overlap > 0) padding = `${Math.ceil(overlap) + 12}px`;
+  }
+  if (stage.style.paddingBottom !== padding) stage.style.paddingBottom = padding;
+}
+window.addEventListener('resize', makeRoomForSheet);
+
+/** The stage's content box: what a picture may occupy (the padding, and on phones the open sheet, excluded). */
+function stageArea(): { width: number; height: number } {
+  const cs = getComputedStyle(stage);
+  return {
+    width: stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+    height: stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
+  };
+}
+
 function fitCanvas(width: number, height: number, oneToOne = false) {
   view.width = width;
   view.height = height;
@@ -308,7 +334,7 @@ function openLoupe(cssX: number, cssY: number) {
   const point = { x: cssX * view.width / Math.max(1, view.clientWidth), y: cssY * view.height / Math.max(1, view.clientHeight) };
   const dpr = window.devicePixelRatio || 1;
   const maxEdge = Math.min(LOUPE_MAX_EDGE, engine.maxTextureSize - 2 * LOUPE_RESERVE);   // the region adds halo and margin
-  const crop = planCrop(source.full, source.preview, point, { width: stage.clientWidth - 32, height: stage.clientHeight - 32 }, dpr, maxEdge);
+  const crop = planCrop(source.full, source.preview, point, stageArea(), dpr, maxEdge);
   loupe = { crop, ...uploadLoupeRegion(crop) };
   fitCanvas(crop.width, crop.height, true);
   badge.textContent = `${source.kind === 'display' ? 'not raw · display-referred' : source.label} · 1:1`;
@@ -557,8 +583,8 @@ saveButton.addEventListener('click', () => void saveJPEG());
 saveAllButton.addEventListener('click', () => void saveSet());
 prevButton.addEventListener('click', () => void showEntry(queueIndex - 1));
 nextButton.addEventListener('click', () => void showEntry(queueIndex + 1));
-$<HTMLButtonElement>('labButton').addEventListener('click', () => { lab.hidden = !lab.hidden; });
-$<HTMLButtonElement>('labClose').addEventListener('click', () => { lab.hidden = true; });
+$<HTMLButtonElement>('labButton').addEventListener('click', () => setLabOpen(lab.hidden));
+$<HTMLButtonElement>('labClose').addEventListener('click', () => setLabOpen(false));
 $<HTMLButtonElement>('resetButton').addEventListener('click', () => {
   const fresh = defaultLabState();
   state.parameters = fresh.parameters; state.printExposureEV = 0;
@@ -641,7 +667,7 @@ window.addEventListener('keydown', (e) => {
   const onSlider = t instanceof HTMLInputElement;
   if (e.key === 'ArrowRight' && !onSlider) { e.preventDefault(); void showEntry(queueIndex + 1); }
   else if (e.key === 'ArrowLeft' && !onSlider) { e.preventDefault(); void showEntry(queueIndex - 1); }
-  else if (e.key === 'Escape') { if (batch) batch.cancelled = true; else if (loupe) closeLoupe(); else lab.hidden = true; }
+  else if (e.key === 'Escape') { if (batch) batch.cancelled = true; else if (loupe) closeLoupe(); else setLabOpen(false); }
   else if ((e.key === 'a' || e.key === 'A') && !e.repeat) setShowingA(true);
 });
 window.addEventListener('keyup', (e) => { if (e.key === 'a' || e.key === 'A') setShowingA(false); });
