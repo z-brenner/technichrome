@@ -195,6 +195,23 @@ const server = http.createServer((req, res) => {
     const viewBox = await page.locator('#view').boundingBox();
     const vh = page.viewportSize().height;
     check(labBox.y + labBox.height >= vh - 1 && labBox.height <= vh * 0.65 && viewBox.y + viewBox.height <= labBox.y + 1, `the Laboratory sheet sits at the bottom (top ${labBox.y.toFixed(0)} of ${vh}) with the whole picture above it (bottom ${(viewBox.y + viewBox.height).toFixed(0)})`);
+    // The sheet's height follows its sections. On a tall viewport closing Exposure shrinks the sheet, and the room
+    // kept under the picture (the stage's bottom padding: the overlap plus 12 px) must follow it at once.
+    const original = page.viewportSize();
+    await page.setViewportSize({ width: original.width, height: 1000 });
+    await page.waitForTimeout(400);
+    const tallSheet = await page.locator('#lab').boundingBox();
+    const exposureTitle = page.locator('#labBody .section', { hasText: 'Exposure' }).locator('.section-title');
+    await exposureTitle.click();
+    await page.waitForTimeout(400);
+    const shrunkSheet = await page.locator('#lab').boundingBox();
+    const room = await page.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(), l = document.getElementById('lab').getBoundingClientRect(); return { overlap: s.bottom - l.top, pad: parseFloat(getComputedStyle(document.getElementById('stage')).paddingBottom) }; });
+    check(shrunkSheet.y > tallSheet.y + 20, `closing Exposure shrinks the sheet on a tall viewport (top ${tallSheet.y.toFixed(0)} → ${shrunkSheet.y.toFixed(0)})`);
+    check(room.overlap > 0 && Math.abs(room.pad - (Math.ceil(room.overlap) + 12)) <= 1, `the room under the picture follows the sheet (overlap ${room.overlap.toFixed(0)}, padding ${room.pad.toFixed(0)})`);
+    console.log(`sheet with Exposure closed on a 1000 px viewport: top ${tallSheet.y.toFixed(0)} → ${shrunkSheet.y.toFixed(0)}, padding ${room.pad.toFixed(0)} for an overlap of ${room.overlap.toFixed(0)}`);
+    await exposureTitle.click();
+    await page.setViewportSize(original);
+    await page.waitForTimeout(400);
     // The same with a wide photograph, which the sheet used to cover almost entirely (needs a second file).
     if (inputs.length > 1) {
     await page.keyboard.press('Escape');
