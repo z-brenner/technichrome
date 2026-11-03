@@ -143,7 +143,21 @@ const server = http.createServer((req, res) => {
     const labBox = await page.locator('#lab').boundingBox();
     const viewBox = await page.locator('#view').boundingBox();
     const vh = page.viewportSize().height;
-    check(labBox.y + labBox.height >= vh - 1 && labBox.height <= vh * 0.65 && viewBox.y < labBox.y, `the Laboratory sheet sits at the bottom (top ${labBox.y.toFixed(0)} of ${vh}) with the picture above it (top ${viewBox.y.toFixed(0)})`);
+    check(labBox.y + labBox.height >= vh - 1 && labBox.height <= vh * 0.65 && viewBox.y + viewBox.height <= labBox.y + 1, `the Laboratory sheet sits at the bottom (top ${labBox.y.toFixed(0)} of ${vh}) with the whole picture above it (bottom ${(viewBox.y + viewBox.height).toFixed(0)})`);
+    // The same with a wide photograph, which the sheet used to cover almost entirely.
+    await page.keyboard.press('Escape');
+    await page.click('#nextButton');
+    await page.waitForFunction(() => document.getElementById('busy').hidden && document.getElementById('counter').textContent.trim().startsWith('2 /'), null, { timeout: 120000 });
+    await page.click('#labButton');
+    await page.waitForTimeout(300);
+    const wideView = await page.locator('#view').boundingBox();
+    const sheet = await page.locator('#lab').boundingBox();
+    check(wideView.y + wideView.height <= sheet.y + 1 && wideView.height > 60, `a wide photograph stays above the sheet (picture ${wideView.y.toFixed(0)}–${(wideView.y + wideView.height).toFixed(0)}, sheet from ${sheet.y.toFixed(0)})`);
+    await page.screenshot({ path: out.replace(/\.png$/, '-lab-wide.png'), fullPage: false });
+    await page.keyboard.press('Escape');
+    await page.click('#prevButton');
+    await page.waitForFunction(() => document.getElementById('busy').hidden && document.getElementById('counter').textContent.trim().startsWith('1 /'), null, { timeout: 120000 });
+    await page.click('#labButton');
     await page.screenshot({ path: out.replace(/\.png$/, '-lab.png'), fullPage: false });
   }
   await page.click('#pinButton');
