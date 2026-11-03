@@ -250,6 +250,7 @@ function remeasure() {
 async function showSource(s: DecodedSource) {
   stopCamera();
   closeLoupe(false);
+  if (cameraBitmap && cameraBitmap.source !== s) releaseCameraBitmap();   // never keep another photograph's decode alive
   engine.deleteSource(previewTexture);
   source = s;
   remeasure();
@@ -268,12 +269,23 @@ async function showSource(s: DecodedSource) {
   renderStill();
 }
 
-/** The camera's rendering for `src`, decoded once (the browser applies the JPEG's colour profile) and kept while it is shown. */
+/** Drops the decoded camera rendering (it belongs to one photograph; it is decoded again in a moment if asked for). */
+function releaseCameraBitmap() {
+  if (!cameraBitmap) return;
+  cameraBitmap.bitmap.close();
+  cameraBitmap = null;
+  showingCamera = false;
+}
+
+/** The camera's rendering for `src`, decoded once (the browser applies the JPEG's colour profile) and kept only while
+ *  `src` is the photograph shown; a decode that finishes after the photograph changed is discarded. */
 async function cameraRendering(src: DecodedSource): Promise<ImageBitmap | null> {
   if (!src.cameraJPEG) return null;
   if (cameraBitmap?.source === src) return cameraBitmap.bitmap;
   // The browser decodes it, applies its colour profile and its EXIF orientation (a ProRAW's JPEG is stored in sensor orientation).
   const bitmap = await createImageBitmap(new Blob([src.cameraJPEG.bytes as BlobPart], { type: 'image/jpeg' }), { imageOrientation: 'from-image' } as ImageBitmapOptions);
+  if (source !== src) { bitmap.close(); return null; }                                    // stale: the photograph changed meanwhile
+  if (cameraBitmap?.source === src) { bitmap.close(); return cameraBitmap.bitmap; }       // another decode of the same one finished first
   cameraBitmap?.bitmap.close();
   cameraBitmap = { source: src, bitmap };
   return bitmap;
@@ -285,8 +297,9 @@ async function setCameraHeld(on: boolean) {
   if (!source?.cameraJPEG || camera) return;
   if (on && cameraBitmap?.source !== source) {
     const src = source;
-    try { await cameraRendering(src); } catch (e) { info.innerHTML = `<b>The camera's rendering could not be decoded.</b> ${esc((e as Error).message)}`; return; }
-    if (source !== src) return;
+    let bitmap: ImageBitmap | null = null;
+    try { bitmap = await cameraRendering(src); } catch (e) { info.innerHTML = `<b>The camera's rendering could not be decoded.</b> ${esc((e as Error).message)}`; return; }
+    if (!bitmap || source !== src) return;
   }
   if (showingCamera !== cameraHeld) { showingCamera = cameraHeld; scheduleRender(); }
 }
@@ -436,6 +449,7 @@ async function openCamera() {
     setBusy(true);
     camera = await startCamera(video);
     closeLoupe(false);
+    releaseCameraBitmap();
     source = null;
     engine.deleteSource(previewTexture); previewTexture = null;
     fitCanvas(camera.width, camera.height);
