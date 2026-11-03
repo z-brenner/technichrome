@@ -8,6 +8,8 @@ export interface Size { width: number; height: number }
 export const LOUPE_HALO = 32;
 /** Extra image uploaded around the crop so that a drag mostly moves the window inside the same texture. */
 export const LOUPE_MARGIN = 128;
+/** What a region adds to the crop on each side; the crop must leave this much of the GPU's texture limit. */
+export const LOUPE_RESERVE = LOUPE_HALO + LOUPE_MARGIN;
 export const LOUPE_MAX_EDGE = 4096;
 
 /** The crop (in full-image pixels) to show 1:1 around `point` (a preview pixel), as large as the stage allows. */
