@@ -1,8 +1,8 @@
 name: Deploy web
 
-# Deploys web/ to Vercel on every push to main, when the repository has the three Vercel secrets. The
-# alternative needing no secrets at all is Vercel's own Git integration (see web/README.md); this workflow
-# exists for repositories that prefer deploying from CI.
+# Deploys web/ to Cloudflare Pages on every push to main, when the repository has the two Cloudflare secrets.
+# The alternative needing no secrets at all is Cloudflare's own Git integration (see web/README.md); this
+# workflow exists for deploying from CI. The project is created on first use if it does not exist.
 
 on:
   push:
@@ -14,24 +14,29 @@ concurrency:
   group: deploy-web
   cancel-in-progress: false
 
+env:
+  PAGES_PROJECT: technichrome
+
 jobs:
   deploy:
-    name: Vercel production deployment
+    name: Cloudflare Pages production deployment
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      deployments: write
     steps:
       - uses: actions/checkout@v4
-      - name: Check for Vercel secrets
+      - name: Check for Cloudflare secrets
         id: secrets
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID are not set; nothing deployed (use Vercel's Git integration or add the secrets)."
+            echo "CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set; nothing deployed (connect the repo in the Cloudflare dashboard or add the secrets)."
           fi
       - uses: actions/setup-node@v4
         if: steps.secrets.outputs.present == 'true'
@@ -39,20 +44,28 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install and test
+      - name: Install, test and build
         if: steps.secrets.outputs.present == 'true'
         working-directory: web
         run: |
           npm ci
           npm test
-      - name: Build and deploy
+          npm run build
+          test -f dist/_headers   # the isolation headers the RAW decoder needs
+      - name: Create the Pages project on first use
         if: steps.secrets.outputs.present == 'true'
         working-directory: web
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
-          npx --yes vercel@latest build --prod --token="$VERCEL_TOKEN"
-          npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+          # Fails harmlessly when the project already exists.
+          npx --yes wrangler@4 pages project create "$PAGES_PROJECT" --production-branch=main 2>&1 | tail -2 || true
+      - name: Deploy
+        if: steps.secrets.outputs.present == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: web
+          command: pages deploy dist --project-name=${{ env.PAGES_PROJECT }} --branch=main --commit-hash=${{ github.sha }}

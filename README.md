@@ -31,7 +31,7 @@ tuned on), or use the camera (labelled *not RAW*: browsers do not expose sensor 
 hold to compare, adjust everything in the Laboratory, save a JPEG. The per-pixel maths is a port of the
 Swift core tested against the same Python fixture (1.6e-8), and the WebGL shaders are checked against it
 in headless Chromium in CI (1.2e-4). Nothing is uploaded. See `web/README.md` for running it locally and
-for push-to-deploy on Vercel.
+for push-to-deploy on Cloudflare Pages.
 
 ## Repository layout
 
