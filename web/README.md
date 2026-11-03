@@ -44,8 +44,9 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
 * **Double-tap for 1:1.** A double-tap or double-click opens a loupe: a crop of the *full* decode
   around that point, shown pixel for pixel on the display (device pixels, so a 2× screen gets a 2× larger
   crop), printed with the dye diffusion scaled to the whole image's long edge exactly as the saved JPEG
-  will be. Hold to compare works in the loupe; double-tap or Escape leaves it. Without it the on-screen
-  preview is a 1600 px copy, which cannot show the diffusion or the key image's fine structure.
+  will be. Drag to move the crop (the image around it is uploaded with a margin, so most drags only move
+  the window), hold still to compare, double-tap or Escape to leave. Without it the on-screen preview is a
+  1600 px copy, which cannot show the diffusion or the key image's fine structure.
 * **Pin a look as A.** In the Laboratory, *Pin as A* keeps the current parameters and print exposure;
   then hold the A key (or the *Hold for A* button) to see A against whatever the sliders say now, in
   the preview or in the loupe. A saved JPEG while holding A is the pinned look (`-A` in the file name).
@@ -55,6 +56,12 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
   fetched by integer texel, never filtered, so the sums are the same floats in the same order). GPU
   memory stays at one tile's worth whatever the image size; when a browser refuses a canvas of the full
   size (phones cap 2D canvases around 16 megapixels) the page halves the size and says so.
+* **Save all** develops every photograph of the set with the look being shown (each with its own print
+  timing, as the app would) and downloads one zip: the prints and the look as JSON (parameters plus the
+  print exposure, which *Import JSON* restores), so a batch can be reproduced later. Escape stops it after
+  the current file; files that fail to decode are skipped and named; prints whose names would collide (a
+  RAW/JPEG pair, two folders) are numbered. The set is fixed when the batch starts. The zip is built in memory, so a set of fifty 12 MP prints is a
+  few hundred megabytes before it downloads.
 * **Memory.** The full decode is kept as LibRaw produced it (16-bit codes, 6 bytes per pixel) or as
   8-bit sRGB (3 bytes), linearised through a table region by region when the engine needs it, rather
   than as floats (12 bytes): a 12 MP DNG holds 72 MB, a 48 MP ProRAW 290 MB, plus the small float preview.
@@ -69,8 +76,9 @@ npm test             # parity with the Python fixture, timing, transfer function
 npm run build        # type-check + production build into dist/
 npm run test:gl      # GPU parity of the built site in headless Chromium, and tiled / windowed rendering against a
                      # whole-image render (needs `npx playwright install chromium`)
-node test/smoke.cjs out.png a.dng b.dng   # end to end on real files: opens them as a set, steps through it,
-                     # opens the loupe, pins a look and holds A, screenshots (not in CI: it needs DNGs)
+node test/smoke.cjs out.png a.dng b.dng   # end to end on real files: opens them as a set, steps through it, opens
+                     # and drags the loupe, pins a look and holds A, saves a print (checks the JPEG's size) and the
+                     # set as a zip (checks its contents), screenshots (not in CI: it needs DNGs)
 ```
 
 The RAW decoder is a pthreads build and needs `SharedArrayBuffer`, so the page must be
@@ -107,4 +115,4 @@ out-of-gamut colours. Saved JPEGs carry the P3 profile on P3-capable browsers.
 * Full-resolution export is no longer bounded by the GPU's texture size (it is tiled), but it is by what
   the browser will hold: the decode itself (see *Memory* above) and, on phones, the 2D canvas the JPEG
   is encoded from. When that fails the page halves the size and says so in the info line.
-* The loupe shows one crop at a time (no panning yet): double-tap elsewhere on the preview to move it.
+* Save all holds the whole zip in memory before it downloads; very large sets should be saved in parts.
