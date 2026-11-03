@@ -171,6 +171,44 @@ const server = http.createServer((req, res) => {
   check(await infoSays('showing A', true), 'holding A shows the pinned look');
   await page.keyboard.up('a');
   check(await infoSays('showing A', false), 'releasing A returns to the current look');
+  // A look as a link: Copy link puts it in the hash; a fresh page opened on that link gets the same sliders.
+  await page.click('#linkButton');
+  await page.waitForTimeout(200);
+  const link = await page.evaluate(() => location.href);
+  check(/#look=[A-Za-z0-9_-]+$/.test(link), `the address carries the look (${link.length} characters)`);
+  const other = await page.context().newPage();
+  await other.goto(link);
+  await other.waitForFunction(() => document.getElementById('labBody').querySelector('input[type=range]') !== null, null, { timeout: 30000 });
+  const linkedEV = await other.locator('#labBody input[type=range]').first().inputValue();
+  check(linkedEV === '0.5', `the linked page restores the print exposure (got ${linkedEV})`);
+  check((await other.textContent('#info')).includes('look from the link'), 'the linked page says where its look came from');
+  await other.close();
+  console.log(`look link: ${link.length} characters, restored print exposure ${linkedEV}`);
+  // A look's name is shown as text, never as markup: a crafted name through Import JSON, pinned and held as A, and
+  // through a link, must appear literally and run nothing.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const crafted = path.join(os.tmpdir(), `technichrome-crafted-${process.pid}.json`);
+  fs.writeFileSync(crafted, JSON.stringify({ name: '<img src=x onerror="window.__xss=1">', keyStrength: 0.3 }));
+  await page.setInputFiles('#importInput', crafted);
+  await page.waitForTimeout(300);
+  await page.click('#pinButton');
+  await page.keyboard.down('a');
+  check(await infoSays('showing A', true), 'the crafted look shows as A');
+  const shownA = await page.textContent('#info');
+  await page.keyboard.up('a');
+  check(shownA.includes('<img src=x') && (await page.evaluate(() => window.__xss)) === undefined, `a crafted look name is shown as text when held as A (got "${shownA.slice(-60)}")`);
+  await page.click('#linkButton');
+  await page.waitForTimeout(200);
+  const craftedLink = await page.evaluate(() => location.href);
+  const victim = await page.context().newPage();
+  await victim.goto(craftedLink);
+  await victim.waitForFunction(() => document.getElementById('info').textContent.includes('look from the link'), null, { timeout: 30000 });
+  await victim.waitForTimeout(300);
+  const victimInfo = await victim.textContent('#info');
+  check(victimInfo.includes('<img src=x') && (await victim.evaluate(() => window.__xss)) === undefined, `a crafted look name in a link is shown as text and runs nothing (got "${victimInfo.slice(-60)}")`);
+  await victim.close();
+  fs.unlinkSync(crafted);
   if (failures.length) console.log('failed checks:\n  ' + failures.join('\n  '));
   if (errors.length) console.log('page errors:\n' + errors.join('\n'));
   await browser.close();

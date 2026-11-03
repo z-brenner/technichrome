@@ -62,9 +62,17 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
   the current file; files that fail to decode are skipped and named; prints whose names would collide (a
   RAW/JPEG pair, two folders) are numbered. The set is fixed when the batch starts. The zip is built in memory, so a set of fifty 12 MP prints is a
   few hundred megabytes before it downloads.
+* **A look as a link.** *Copy link* in the Laboratory puts the current look (parameters and print exposure,
+  deflated, about 1 KB) in the address bar and on the clipboard; opening that link anywhere applies the look,
+  so a look tuned on a desk reaches a phone without a file. The JSON export remains the form the app reads.
 * **Memory.** The full decode is kept as LibRaw produced it (16-bit codes, 6 bytes per pixel) or as
   8-bit sRGB (3 bytes), linearised through a table region by region when the engine needs it, rather
   than as floats (12 bytes): a 12 MP DNG holds 72 MB, a 48 MP ProRAW 290 MB, plus the small float preview.
+  Measured once in headless Chromium with software rendering on a 61 MP Sony ARW (117 MB): decoded in 18 s,
+  about 400 MB held afterwards, the loupe in 0.6 s, the full 9568×6376 JPEG saved in 27 s (a real GPU is far
+  quicker at the last step). A phone's limits remain untested.
+* **Nothing from a file, a camera or a link is interpreted as markup.** Camera models, file names, look names
+  and error messages are escaped before the info line shows them.
 
 ## Running it
 

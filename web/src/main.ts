@@ -13,6 +13,8 @@ import { buildLab, defaultLabState, type LabState } from './ui/lab';
 import { installParityHook } from './parity';
 import { LOUPE_MAX_EDGE, LOUPE_RESERVE, type Rect, place, planCrop, regionFor, regionServes } from './ui/loupe';
 import { uniqueName } from './ui/names';
+import { decodeLook, encodeLook } from './ui/looklink';
+import { escapeHTML as esc } from './ui/html';
 import { strToU8, zipSync } from 'fflate';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -39,13 +41,14 @@ const prevButton = $<HTMLButtonElement>('prevButton');
 const nextButton = $<HTMLButtonElement>('nextButton');
 const counter = $<HTMLSpanElement>('counter');
 const pinButton = $<HTMLButtonElement>('pinButton');
+const linkButton = $<HTMLButtonElement>('linkButton');
 const showAButton = $<HTMLButtonElement>('showAButton');
 
 let engine: GLEngine;
 try {
   engine = new GLEngine(view, 33);
 } catch (e) {
-  info.innerHTML = `<b>This browser cannot run the engine.</b> ${(e as Error).message}`;
+  info.innerHTML = `<b>This browser cannot run the engine.</b> ${esc((e as Error).message)}`;
   throw e;
 }
 const output = engine.supportsP3Canvas ? 'displayP3' : 'sRGB';
@@ -104,10 +107,11 @@ function describe(): string {
   if (camera && !source) return `<b>Camera</b> · ${camera.width}×${camera.height} · not RAW: the browser's own processed stream, linearised from sRGB · timed ${fmtEV(cameraTimingEV)}`;
   if (!source) return 'Open a photograph to begin.';
   const L = look();
+  // Everything here that came from a file, a camera or a link is escaped: the info line is HTML.
   const parts: string[] = [];
   if (queueIndex >= 0 && queue[queueIndex]?.source === source && queue.length > 1) parts.push(`<b>${queueIndex + 1} / ${queue.length}</b>`);
-  parts.push(`<b>${source.label}</b>`);
-  if (source.cameraModel) parts.push(source.cameraModel);
+  parts.push(`<b>${esc(source.label)}</b>`);
+  if (source.cameraModel) parts.push(esc(source.cameraModel));
   parts.push(`${source.full.width}×${source.full.height}`);
   if (source.iso) parts.push(`ISO ${source.iso.toFixed(0)}`);
   if (source.shutter) parts.push(source.shutter >= 1 ? `${source.shutter.toFixed(1)} s` : `1/${(1 / source.shutter).toFixed(0)} s`);
@@ -118,7 +122,7 @@ function describe(): string {
   if (source.kind === 'display') parts.push('developed as display-referred data');
   if (loupe) parts.push(`1:1 crop at ${loupe.crop.x},${loupe.crop.y}`);
   if (batch) parts.push(`<b>saving the set · ${batch.done} / ${batch.total}</b>`);
-  if (showingA && pinned) parts.push(`<b>showing A · ${pinned.parameters.name}</b>`);
+  if (showingA && pinned) parts.push(`<b>showing A · ${esc(pinned.parameters.name)}</b>`);
   return parts.join(' · ');
 }
 
@@ -273,7 +277,7 @@ async function showEntry(index: number) {
     try {
       await decodeEntry(entry);
     } catch (e) {
-      if (serial === openSerial) info.innerHTML = `<b>Could not open ${entry.file.name}.</b> ${(e as Error).message}`;
+      if (serial === openSerial) info.innerHTML = `<b>Could not open ${esc(entry.file.name)}.</b> ${esc((e as Error).message)}`;
       return;
     } finally {
       if (serial === openSerial) setBusy(false);
@@ -408,7 +412,7 @@ async function openCamera() {
     };
     loop();
   } catch (e) {
-    info.innerHTML = `<b>The camera could not be started.</b> ${(e as Error).message}`;
+    info.innerHTML = `<b>The camera could not be started.</b> ${esc((e as Error).message)}`;
   } finally {
     cameraStarting = false;
     setBusy(false);
@@ -495,7 +499,7 @@ async function saveJPEG() {
     download(print.blob, printName(source, L));
     info.innerHTML = `${describe()} · <b>saved ${print.width}×${print.height}${print.note}</b>`;
   } catch (e) {
-    info.innerHTML = `<b>Could not save.</b> ${(e as Error).message}`;
+    info.innerHTML = `<b>Could not save.</b> ${esc((e as Error).message)}`;
   } finally {
     setBusy(false);
   }
@@ -544,11 +548,11 @@ async function saveSet() {
     const cancelled = batch.cancelled;
     batch = null;
     const summary = [`<b>${cancelled ? 'stopped after' : 'saved'} ${saved} print${saved === 1 ? '' : 's'}${saved ? ' as a zip, with the look as JSON' : ''}</b>`];
-    if (skipped.length) summary.push(`skipped ${skipped.length}: ${skipped.join('; ')}`);
+    if (skipped.length) summary.push(`skipped ${skipped.length}: ${esc(skipped.join('; '))}`);
     info.innerHTML = `${describe()} · ${summary.join(' · ')}`;
   } catch (e) {
     batch = null;
-    info.innerHTML = `<b>Could not save the set.</b> ${(e as Error).message}`;
+    info.innerHTML = `<b>Could not save the set.</b> ${esc((e as Error).message)}`;
   } finally {
     batch = null;
     setBusy(false);
@@ -614,10 +618,35 @@ importInput.addEventListener('change', async () => {
     remeasure();
     scheduleRender();
   } catch (e) {
-    info.innerHTML = `<b>Could not import ${f.name}.</b> ${(e as Error).message}`;
+    info.innerHTML = `<b>Could not import ${esc(f.name)}.</b> ${esc((e as Error).message)}`;
   }
 });
 pinButton.addEventListener('click', pinLook);
+
+// A look as a link: put it in the address bar and on the clipboard; opening such a link applies it.
+linkButton.addEventListener('click', async () => {
+  const hash = encodeLook({ parameters: state.parameters, printExposureEV: state.printExposureEV });
+  history.replaceState(null, '', `#${hash}`);
+  let copied = false;
+  try { await navigator.clipboard.writeText(location.href); copied = true; } catch { /* no clipboard access: the address bar has it */ }
+  info.innerHTML = `${describe()} · <b>${copied ? 'link copied' : 'the address bar now carries this look'}</b> (${(location.href.length / 1024).toFixed(1)} KB)`;
+});
+function applyLinkedLook() {
+  if (!location.hash) return;
+  try {
+    const shared = decodeLook(location.hash);
+    if (!shared) return;
+    state.parameters = shared.parameters;
+    state.printExposureEV = shared.printExposureEV;
+    buildLab(labBody, state, () => scheduleRender());
+    remeasure();
+    scheduleRender();
+    info.innerHTML = `${describe()} · <b>look from the link: ${esc(shared.parameters.name)}</b>`;
+  } catch (e) {
+    info.innerHTML = `<b>Could not read the look in this link.</b> ${esc((e as Error).message)}`;
+  }
+}
+window.addEventListener('hashchange', applyLinkedLook);
 showAButton.addEventListener('pointerdown', (e) => { e.preventDefault(); setShowingA(true); });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) showAButton.addEventListener(ev, () => setShowingA(false));
 
@@ -686,3 +715,4 @@ stage.addEventListener('drop', (e) => {
 labBody.addEventListener('input', remeasure);
 
 info.innerHTML = describe();
+applyLinkedLook();

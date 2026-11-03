@@ -3,6 +3,9 @@
 Each entry is one pull request, merged after CI (Linux core tests, Python prototype checks, an iOS
 build and simulator GPU tests on a macOS runner) and a Codex review.
 
+## Round 16 — a look as a link (#17)
+- *Copy link* in the Laboratory encodes the look (parameters and print exposure) into the page's hash and copies the address; opening it anywhere applies the look.
+
 ## Round 15 — the phone layout (#16)
 - On narrow screens the Laboratory is a sheet over the lower part of the screen (the picture stays visible), the header is compact, the hints are short and say nothing about keys on touch devices.
 - `MOBILE=1 node test/smoke.cjs` runs the smoke test as an iPhone: touch double-tap for the loupe, 1:1 in device pixels, the sheet's position.
