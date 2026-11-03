@@ -225,6 +225,15 @@ function evictCache() {
   }
 }
 
+/** The entry's decode: cached, or one decode per entry shared by whoever asks for it while it runs. */
+async function decodeEntry(entry: Entry): Promise<DecodedSource> {
+  if (entry.source) return entry.source;
+  entry.pending ??= decodeFile(entry.file).finally(() => { delete entry.pending; });
+  const decoded = await entry.pending;
+  entry.source = decoded;
+  return decoded;
+}
+
 async function showEntry(index: number) {
   if (index < 0 || index >= queue.length) return;
   const serial = ++openSerial;
@@ -236,9 +245,7 @@ async function showEntry(index: number) {
   } else {
     setBusy(true);
     try {
-      // One decode per entry, shared by whoever asks for it while it runs.
-      entry.pending ??= decodeFile(entry.file).finally(() => { delete entry.pending; });
-      entry.source = await entry.pending;
+      await decodeEntry(entry);
     } catch (e) {
       if (serial === openSerial) info.innerHTML = `<b>Could not open ${entry.file.name}.</b> ${(e as Error).message}`;
       return;
@@ -249,7 +256,7 @@ async function showEntry(index: number) {
   }
   entry.lastUsed = ++useClock;
   evictCache();
-  await showSource(entry.source);
+  await showSource(entry.source!);
 }
 
 /** Opens a set of files as the new queue (sorted by name) and shows the first. A single file is always tried. */
@@ -483,13 +490,10 @@ async function saveSet() {
     for (let i = 0; i < entries.length && !batch.cancelled; i++) {
       const entry = entries[i];
       progress(entry.file.name, 'decoding');
-      let src = entry.source;
-      if (!src) {
-        try { src = await decodeFile(entry.file); } catch (e) { skipped.push(`${entry.file.name}: ${(e as Error).message}`); batch.done++; continue; }
-        entry.source = src;
-        entry.lastUsed = ++useClock;
-        evictCache();
-      }
+      let src: DecodedSource;
+      try { src = await decodeEntry(entry); } catch (e) { skipped.push(`${entry.file.name}: ${(e as Error).message}`); batch.done++; continue; }
+      entry.lastUsed = ++useClock;
+      evictCache();
       if (batch.cancelled) break;
       const lookFor: Look = { parameters, printExposureEV: printEV, timingEV: measureTiming(src, parameters) };
       try {
