@@ -62,6 +62,18 @@ jobs:
       - name: GPU parity of the built site
         working-directory: web
         run: npm run test:gl
+      - name: End to end on synthetic DNGs (desktop, then as an iPhone)
+        working-directory: web
+        run: |
+          npm run test:smoke
+          npm run test:smoke:mobile
+      - name: Smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke-screenshots
+          path: web/smoke*.png
+          if-no-files-found: ignore
 
   ios-build:
     # macOS minutes are billed at 10x on private repositories, so this job runs on pull requests

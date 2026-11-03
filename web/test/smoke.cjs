@@ -75,13 +75,15 @@ const server = http.createServer((req, res) => {
     await page.waitForTimeout(300);
     console.log(`next in ${((Date.now() - t1) / 1000).toFixed(1)} s: ${await page.textContent('#info')}`);
     await page.screenshot({ path: out.replace(/\.png$/, '-2.png'), fullPage: false });
-    // The camera's own rendering: hold C. This file's embedded JPEG may be a small preview (then it says "scaled").
-    await page.keyboard.down('c');
-    check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering of the second file");
-    console.log(`camera's rendering (2): ${(await page.textContent('#info')).replace(/.*· (the camera.*)$/, '$1')}`);
-    await page.screenshot({ path: out.replace(/\.png$/, '-2-camera.png'), fullPage: false });
-    await page.keyboard.up('c');
-    check(await infoSays("the camera's own rendering", false), 'releasing C returns to the print');
+    // The camera's own rendering: hold C (when the file embeds a JPEG; a small preview says "scaled").
+    if (!(await page.isHidden('#cameraHoldButton'))) {
+      await page.keyboard.down('c');
+      check(await infoSays("the camera's own rendering", true), "holding C shows the camera's rendering of the second file");
+      console.log(`camera's rendering (2): ${(await page.textContent('#info')).replace(/.*· (the camera.*)$/, '$1')}`);
+      await page.screenshot({ path: out.replace(/\.png$/, '-2-camera.png'), fullPage: false });
+      await page.keyboard.up('c');
+      check(await infoSays("the camera's own rendering", false), 'releasing C returns to the print');
+    }
     await page.keyboard.press('ArrowLeft');
     await page.waitForFunction((n) => document.getElementById('counter').textContent.trim() === `1 / ${n}` && document.getElementById('busy').hidden, inputs.length, { timeout: 120000 });
     check((await page.textContent('#info')).includes('1 / '), 'going back shows the first again');
@@ -97,6 +99,11 @@ const server = http.createServer((req, res) => {
     check(await infoSays("the camera's own rendering", false), 'releasing C returns to the print');
   }
   // The loupe: a double-click (a touch double-tap on the phone) on the canvas shows a 1:1 crop; Escape leaves it.
+  // A small photograph would fit the stage whole, which leaves the crop nothing to move over: shrink the window for it.
+  const fullSize = (await page.textContent('#info')).match(/(\d+)×(\d+)/).map(Number);
+  const stageBox = await page.locator('#stage').boundingBox();
+  const shrunk = !mobile && fullSize[1] < stageBox.width && fullSize[2] < stageBox.height;
+  if (shrunk) await page.setViewportSize({ width: Math.max(300, fullSize[1] - 20), height: Math.max(300, fullSize[2] + 150) });
   const box = await page.locator('#view').boundingBox();
   if (mobile) {
     await page.touchscreen.tap(box.x + box.width * 0.5, box.y + box.height * 0.5);
@@ -124,10 +131,13 @@ const server = http.createServer((req, res) => {
     await page.keyboard.up('c');
     check(await infoSays("the camera's own rendering", false), 'releasing C in the loupe returns to the print');
   }
-  // Dragging inside the loupe moves the crop (mouse only: the touchscreen API has no drag).
+  // Dragging inside the loupe moves the crop (mouse only: the touchscreen API has no drag), as far as the image allows.
   const before = (await page.textContent('#info')).match(/1:1 crop at (\d+),(\d+)/);
   if (mobile) await page.screenshot({ path: out.replace(/\.png$/, '-loupe.png'), fullPage: false });
   if (!mobile) {
+  const crop = await page.evaluate(() => { const v = document.getElementById('view'); return { w: v.width, h: v.height }; });
+  const room = { x: fullSize[1] - crop.w - Number(before[1]), y: fullSize[2] - crop.h - Number(before[2]) };
+  const expect = { x: Math.min(120, Math.max(0, room.x)), y: Math.min(60, Math.max(0, room.y)) };
   const lb = await page.locator('#view').boundingBox();
   await page.mouse.move(lb.x + lb.width * 0.5, lb.y + lb.height * 0.5);
   await page.mouse.down();
@@ -135,11 +145,13 @@ const server = http.createServer((req, res) => {
   await page.mouse.up();
   await page.waitForTimeout(300);
   const after = (await page.textContent('#info')).match(/1:1 crop at (\d+),(\d+)/);
-  check(before && after && (Number(after[1]) - Number(before[1]) === 120) && (Number(after[2]) - Number(before[2]) === 60), `dragging 120,60 CSS px moves the crop by 120,60 at dpr 1 (got ${before && before[0]} → ${after && after[0]})`);
+  check(before && after && (Number(after[1]) - Number(before[1]) === expect.x) && (Number(after[2]) - Number(before[2]) === expect.y), `dragging 120,60 CSS px moves the crop by ${expect.x},${expect.y} at dpr 1 (room ${room.x},${room.y}; got ${before && before[0]} → ${after && after[0]})`);
+  console.log(`loupe drag: crop ${crop.w}×${crop.h} in ${fullSize[1]}×${fullSize[2]}, moved ${Number(after[1]) - Number(before[1])},${Number(after[2]) - Number(before[2])} (room ${room.x},${room.y})`);
   }
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   check(!(await page.textContent('#badge')).includes('1:1'), 'Escape leaves the loupe');
+  if (shrunk) await page.setViewportSize({ width: 1400, height: 1000 });
   // Save JPEG: the download is a JPEG of the decode's full size.
   const size = (await page.textContent('#info')).match(/(\d+)×(\d+)/);
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 180000 }), page.click('#saveButton')]);
