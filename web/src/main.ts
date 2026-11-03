@@ -202,8 +202,25 @@ function updateHint() {
  *  exactly the overlap, so a picture of any shape fits above the sheet. */
 function setLabOpen(open: boolean) {
   lab.hidden = !open;
+  placeControls();
   makeRoomForSheet();
   if (open) updateReadout();
+}
+
+/** On a phone the open sheet covers the footer, so what the footer holds that the Laboratory needs, the hold-to-compare
+ *  control and the status line, moves into the sheet while it is open (the head and under the look's actions) and
+ *  back when it closes. The handlers travel with the elements. */
+const labHead = lab.querySelector('.lab-head') as HTMLElement, labClose = $<HTMLButtonElement>('labClose'), lookBlock = lab.querySelector('.look') as HTMLElement;
+const footText = status.parentElement as HTMLElement, footActions = compare.parentElement as HTMLElement;
+function placeControls() {
+  const inSheet = !lab.hidden && getComputedStyle(lab).position === 'fixed';
+  if (inSheet) {
+    if (compare.parentElement !== labHead) labHead.insertBefore(compare, labClose);
+    if (status.parentElement !== lookBlock) lookBlock.appendChild(status);
+  } else {
+    if (compare.parentElement !== footActions) footActions.insertBefore(compare, detailsButton);
+    if (status.parentElement !== footText) footText.appendChild(status);
+  }
 }
 
 function setHelpOpen(open: boolean) { help.hidden = !open; }
@@ -216,7 +233,7 @@ function makeRoomForSheet() {
   }
   if (stage.style.paddingBottom !== padding) stage.style.paddingBottom = padding;
 }
-window.addEventListener('resize', makeRoomForSheet);
+window.addEventListener('resize', () => { placeControls(); makeRoomForSheet(); });
 // The sheet's height follows its content (sections open or closed), and the stage's follows the header's and the
 // footer's (a status line coming and going, the details line): the room follows both. The stage is observed by its
 // border box, which the padding this sets does not change.
