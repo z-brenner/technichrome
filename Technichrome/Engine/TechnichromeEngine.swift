@@ -57,8 +57,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
     private let pickChannelsKernel: CIColorKernel
     private let logLuminanceKernel: CIColorKernel
 
-    private let lutLock = NSLock()
-    private var lutCache: (key: PrintModelKey, cube: Data, dimension: Int)?
+    private let cubes: DyeCubeCache
     public let lutDimension: Int
 
     public init(lutDimension: Int = 33) throws {
@@ -81,22 +80,19 @@ public final class TechnichromeEngine: @unchecked Sendable {
         pickChannelsKernel = try load("tc_pick_channels")
         logLuminanceKernel = try load("tc_log_luminance")
         self.lutDimension = lutDimension
+        cubes = DyeCubeCache(dimension: lutDimension, displaySpace: .displayP3, capacity: 4)
     }
 
     // MARK: - LUT
 
-    /// Bakes (and caches) the dye cube for a parameter set. Only the print-model parameters matter
-    /// for the cube, so edits to exposure/curves reuse the cached data.
+    /// The dye cube for a parameter set, baked on first use and kept. Only the print-model parameters matter
+    /// for the cube, so edits to exposure/curves reuse the cached data; up to four sets of print-model inputs
+    /// keep their cubes at once (say the live preview's and the Laboratory's, or two looks being compared), so
+    /// looks used in turn never re-bake. Safe from any queue, for instance to prewarm a cube in the background:
+    /// the bake runs outside the cache's lock, so a caller whose cube is already cached never waits for it.
     public func cubeData(for p: EngineParameters) -> (Data, Int) {
-        let key = PrintModelKey(p)
-        lutLock.lock(); defer { lutLock.unlock() }
-        if let c = lutCache, c.key == key {
-            return (c.cube, c.dimension)
-        }
-        let lut = LUTBuilder.build(parameters: p, dimension: lutDimension, displaySpace: .displayP3)
-        let data = lut.data.withUnsafeBufferPointer { Data(buffer: $0) }
-        lutCache = (key, data, lut.dimension)
-        return (data, lut.dimension)
+        let cube = cubes.cube(for: p)
+        return (cube.data, cube.dimension)
     }
 
     // MARK: - Graph
