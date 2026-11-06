@@ -4,7 +4,8 @@
 //
 //  Live preview: camera frames → Technichrome engine → Metal view. The video frames are
 //  display-referred (Apple's own tone mapping), so this is an approximation of the print; the
-//  developed photograph is rendered from the RAW data. Rendering is paced by the display.
+//  developed photograph is rendered from the RAW data. Rendering is paced by the camera: a frame is
+//  drawn when one arrives.
 //
 
 import Foundation
@@ -25,21 +26,25 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     private var latest: CIImage?
     nonisolated private let frameLock = NSLock()
     nonisolated(unsafe) private var pendingFrame: CIImage?
-    var parameters: EngineParameters = .default { didSet { if parameters != oldValue { dirty = true } } }
-    var exposureEV: Double = 0 { didSet { dirty = true } }
+    /// A draw is queued on the main queue and has not run yet; guarded by `frameLock` (see requestDraw).
+    nonisolated(unsafe) private var drawPending = false
+    /// The view being drawn: `makeView` makes a new one each time the camera view appears.
+    private weak var view: MTKView?
+    var parameters: EngineParameters = .default { didSet { if parameters != oldValue { invalidate() } } }
+    var exposureEV: Double = 0 { didSet { invalidate() } }
     /// The photographer's exposure compensation, excluded from the preview's print timing like the develop step's.
     var cameraBiasEV: Double = 0
-    var showsLook = true { didSet { dirty = true } }
+    var showsLook = true { didSet { invalidate() } }
     /// The camera's system pressure. The preview's own cost is shed first: from `.serious` the timing
     /// measurement pauses, from `.critical` the preview is plain (photographs are still developed with the look).
-    var systemPressure: CameraPressure = .nominal { didSet { if systemPressure != oldValue { dirty = true } } }
+    var systemPressure: CameraPressure = .nominal { didSet { if systemPressure != oldValue { invalidate() } } }
     /// Print timing for the preview: measured about twice a second from the frames and smoothed, so the
     /// preview predicts the timed print rather than the untimed one.
     private(set) var previewTimingEV: Double = 0
     /// A timing measurement is on the GPU (see startPreviewTimingMeasurement).
     private var timingInFlight = false
     private var frameCounter = 0
-    /// Set when a new frame, parameter or size requires a redraw; the view ticks at 30 fps regardless.
+    /// Set when a new frame, parameter or size requires a redraw.
     private var dirty = true
     private var lastDrawableSize: CGSize = .zero
     /// Rendered image rect in view points (for tap-to-focus mapping).
@@ -59,15 +64,43 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         v.delegate = self
         v.framebufferOnly = false
         v.colorPixelFormat = .bgra8Unorm
-        v.isPaused = false
+        // Explicit drawing (MTKView: paused, no setNeedsDisplay, call `draw()`): a frame is drawn when the camera
+        // delivers one or a parameter changes, not on a display timer that is not phase-locked to the camera
+        // (which gave a variable latency and dropped or doubled frames). A stopped camera draws nothing.
+        v.isPaused = true
         v.enableSetNeedsDisplay = false
-        v.preferredFramesPerSecond = 30
         v.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         v.backgroundColor = .black
         if let layer = v.layer as? CAMetalLayer {
             layer.colorspace = TechnichromeEngine.outputColorSpace
         }
+        view = v
+        dirty = true
         return v
+    }
+
+    /// A parameter changed: draw the last frame again, even with the camera stopped.
+    private func invalidate() {
+        dirty = true
+        requestDraw()
+    }
+
+    /// Asks for one draw on the main queue. Requests made before it runs (frames arriving faster than the main
+    /// thread draws, parameter changes) are coalesced into it, and it draws the newest frame.
+    nonisolated private func requestDraw() {
+        frameLock.lock()
+        let schedule = !drawPending
+        drawPending = true
+        frameLock.unlock()
+        guard schedule else { return }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.performRequestedDraw() }
+        }
+    }
+
+    private func performRequestedDraw() {
+        frameLock.lock(); drawPending = false; frameLock.unlock()
+        view?.draw()                      // calls draw(in:) synchronously
     }
 
     /// Drops the last camera frame, and the pixel buffer it holds, while the camera view is away: the renderer
@@ -81,9 +114,12 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     nonisolated func submit(pixelBuffer: CVPixelBuffer) {
         let image = CIImage(cvPixelBuffer: pixelBuffer)
         frameLock.lock(); pendingFrame = image; frameLock.unlock()
+        requestDraw()
     }
 
-    nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        requestDraw()                     // render() notices the new size
+    }
 
     nonisolated func draw(in view: MTKView) {
         // MTKView calls its delegate on the main thread.
@@ -94,8 +130,7 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         frameLock.lock(); let frame = pendingFrame; pendingFrame = nil; frameLock.unlock()
         if let frame { latest = frame; dirty = true }
         if view.drawableSize != lastDrawableSize { lastDrawableSize = view.drawableSize; dirty = true }
-        guard dirty, let source = latest, let drawable = view.currentDrawable, let buffer = commandQueue.makeCommandBuffer() else { return }
-        dirty = false
+        guard dirty, let source = latest else { return }
 
         // Aspect-fit into the drawable. The frame is scaled down *before* the engine runs: the camera can
         // deliver frames far larger than the screen, and the per-pixel maths costs the same for every pixel.
@@ -130,6 +165,10 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         let pointScale = view.contentScaleFactor > 0 ? view.contentScaleFactor : 1
         imageRect = CGRect(x: ox / pointScale, y: (dsize.height - oy - h) / pointScale, width: w / pointScale, height: h / pointScale)
 
+        // The drawable is obtained as late as possible, once the graph is built: `currentDrawable` can block the
+        // main thread while every drawable is in flight.
+        guard let drawable = view.currentDrawable, let buffer = commandQueue.makeCommandBuffer() else { return }
+        dirty = false
         let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: buffer)
         destination.colorSpace = TechnichromeEngine.outputColorSpace
         destination.alphaMode = .none
