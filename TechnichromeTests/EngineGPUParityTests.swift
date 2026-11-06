@@ -39,6 +39,11 @@ final class EngineGPUParityTests: XCTestCase {
         SIMD3(-0.05, 0.4, 0.5), SIMD3(0.6, -0.02, 0.05),
     ]
 
+    /// Three times the worst error the simulator measured in CI (2.2e-3 to 2.4e-3 on the three looks, round 22),
+    /// where the old 0.02 allowed errors of ΔE00 20 and more in the shadows. Core Image's cube is the larger part of
+    /// it (the web engine, with the same cube read by hand in float, is at 1.2e-4).
+    static let tolerance = 0.0075
+
     /// Renders the samples through the GPU engine and the CPU reference with `params`, checks every channel and
     /// prints the worst error (the CI log keeps it, so the tolerance can follow what the simulator measures).
     @discardableResult
@@ -56,7 +61,7 @@ final class EngineGPUParityTests: XCTestCase {
             for c in 0..<3 {
                 let err = abs(pixels[i][c] - expected[c])
                 worst = max(worst, err)
-                XCTAssertEqual(pixels[i][c], expected[c], accuracy: 0.02, "\(label): sample \(i) \(s) channel \(c): GPU \(pixels[i]) vs reference \(expected)")
+                XCTAssertEqual(pixels[i][c], expected[c], accuracy: Self.tolerance, "\(label): sample \(i) \(s) channel \(c): GPU \(pixels[i]) vs reference \(expected)")
             }
         }
         print("GPU vs CPU reference worst error (\(label)): \(worst)")

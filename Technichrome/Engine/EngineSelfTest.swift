@@ -19,7 +19,8 @@ public struct EngineSelfTestResult: Sendable {
 
 public enum EngineSelfTest {
     static let workingSpace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
-    static let tolerance = 0.02
+    /// Three times the worst error measured on the simulator (EngineGPUParityTests.tolerance; 2.2e-3 to 2.4e-3).
+    static let tolerance = 0.0075
 
     public static let samples: [SIMD3<Double>] = [
         SIMD3(1, 1, 1), SIMD3(0.18, 0.18, 0.18), SIMD3(0.02, 0.02, 0.02), SIMD3(3, 3, 3), SIMD3(0.42, 0.04, 0.045),
@@ -39,7 +40,7 @@ public enum EngineSelfTest {
         let varied = worstError(engine: engine, context: context, parameters: unequal)
         let worst = max(look.error, varied.error)
         let passed = worst < tolerance
-        let detail = String(format: "max |GPU − reference| = %.4f on sample %d, %.4f on sample %d with unequal dye D max (tolerance %.2f)",
+        let detail = String(format: "max |GPU − reference| = %.4f on sample %d, %.4f on sample %d with unequal dye D max (tolerance %.4f)",
                             look.error, look.index, varied.error, varied.index, tolerance)
         return EngineSelfTestResult(worstError: worst, sampleCount: samples.count, passed: passed, detail: detail)
     }
