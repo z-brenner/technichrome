@@ -112,7 +112,12 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
 
     /// Called on the video queue.
     nonisolated func submit(pixelBuffer: CVPixelBuffer) {
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        // The buffers arrive in the sensor's native landscape orientation (the video connection's angle is 0).
+        // The interface is portrait only and the cameras are back cameras, so every frame is turned 90°
+        // clockwise, whatever the phone's orientation, exactly as the connection's angle of 90 did before:
+        // `.right` is the orientation iOS records for a portrait photograph from the same native data
+        // (CGImagePropertyOrientation), and `oriented` applies the rotation that displays it upright.
+        let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
         frameLock.lock(); pendingFrame = image; frameLock.unlock()
         requestDraw()
     }
@@ -236,7 +241,8 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         let nx = (p.x - imageRect.minX) / imageRect.width
         let ny = (p.y - imageRect.minY) / imageRect.height
         guard (0...1).contains(nx), (0...1).contains(ny) else { return nil }
-        // Preview frames are rotated 90° (portrait); the sensor's x axis runs down the screen.
+        // The displayed frame is the native frame turned 90° clockwise (see submit); the sensor's x axis runs
+        // down the screen.
         return CGPoint(x: ny, y: 1 - nx)
     }
 }

@@ -569,9 +569,13 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
             videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
             if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
         }
-        // Portrait preview frames.
-        if let c = videoOutput.connection(with: .video), c.isVideoRotationAngleSupported(90) {
-            c.videoRotationAngle = 90
+        // Preview frames in the sensor's native orientation: the renderer turns them upright in Core Image
+        // (PreviewRenderer.submit), a transform folded into the first kernel's sampling. On a video data output
+        // a rotation angle "delivers physically rotated buffers instead, which costs work on every frame"
+        // (AVCaptureConnection.videoRotationAngle), and Apple asks apps that rotate buffers themselves to set
+        // 0 on every device, since the default can differ. Set inside the configuration, before running.
+        if let c = videoOutput.connection(with: .video), c.isVideoRotationAngleSupported(0), c.videoRotationAngle != 0 {
+            c.videoRotationAngle = 0
         }
         rotationCoordinator = AVCaptureDevice.RotationCoordinator(device: dev, previewLayer: nil)
 
