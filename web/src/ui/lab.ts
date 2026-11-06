@@ -6,7 +6,8 @@ export interface LabState {
   parameters: EngineParameters;
   /** Per-photograph print exposure on top of the parameters, in stops (the app's printExposureEV). */
   printExposureEV: number;
-  /** Era of the silver key: 0.15 (shipped), 1 (1935 full key), 0.5 (light), 0 (post-1944). */
+  /** The print era sets the silver key's strength: 1 (1930s, full key), 0.5 (1930s, light), 0.15 (shipped, faint), 0
+   *  (post-war US, none) — see docs/COLOR_SCIENCE.md for what the period sources say. */
 }
 
 type Getter = (s: LabState) => number;
@@ -57,7 +58,7 @@ const SECTIONS: { title: string; sliders: SliderSpec[]; extra?: (state: LabState
     ],
   },
   {
-    title: 'Silver key image (1932–c.1944)',
+    title: 'Silver key image',
     sliders: [
       { title: 'Key strength', min: 0, max: 1, step: 0.01, format: f2, get: (s) => s.parameters.keyStrength, set: (s, v) => { s.parameters.keyStrength = v; } },
       { title: 'Key gamma', min: 0.2, max: 2, step: 0.01, format: f2, get: (s) => s.parameters.key.gamma, set: (s, v) => { s.parameters.key.gamma = v; } },
@@ -66,7 +67,7 @@ const SECTIONS: { title: string; sliders: SliderSpec[]; extra?: (state: LabState
     extra: (state, rerender) => {
       const both = document.createElement('div');
       both.append(segmented('Print era', [
-        ['1935 · full key', 1], ['1939–44 · light key', 0.5], ['shipped · 0.15', 0.15], ['post-1944 · none', 0],
+        ['1930s · full key', 1], ['1930s · light key', 0.5], ['shipped · faint key', 0.15], ['post-war US · none', 0],
       ], () => state.parameters.keyStrength, (v) => { state.parameters.keyStrength = v; rerender(); }), dyeSetChoice(state, rerender));
       return both;
     },

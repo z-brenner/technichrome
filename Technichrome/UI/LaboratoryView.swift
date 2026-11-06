@@ -219,11 +219,11 @@ struct LaboratoryView: View {
     private func lightRow(_ t: String, _ b: Binding<Double>) -> some View { slider(t, b, -1.5...1.5, step: 0.01, format: "%+.2f EV") }
 
     private var keySection: some View {
-        Section("Silver key image (1932–c.1944)") {
+        Section("Silver key image") {
             Picker("Print era", selection: keyEra) {
-                Text("1935 · full key").tag(KeyEra.full)
-                Text("1939–44 · light key").tag(KeyEra.light)
-                Text("post-1944 · no key").tag(KeyEra.none)
+                Text("1930s · full key").tag(KeyEra.full)
+                Text("shipped · faint key").tag(KeyEra.light)
+                Text("post-war US · no key").tag(KeyEra.none)
                 Text("custom").tag(KeyEra.custom)
             }
             .pickerStyle(.menu)
@@ -310,7 +310,9 @@ struct LaboratoryView: View {
 
     enum KeyEra: Hashable { case full, light, none, custom }
 
-    /// The documented "50 %" key of the first prints, the lighter key the engine ships with, or none.
+    /// The print era by its silver key: the model's full key (1930s prints carried one; period sources call it
+    /// "thin"), the faint key the engine ships with (some late-1940s London prints), or none (post-war US prints).
+    /// See docs/COLOR_SCIENCE.md; the strengths are unchanged.
     private var keyEra: Binding<KeyEra> {
         Binding(get: {
             switch params.keyStrength {
