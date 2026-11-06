@@ -80,7 +80,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
         pickChannelsKernel = try load("tc_pick_channels")
         logLuminanceKernel = try load("tc_log_luminance")
         self.lutDimension = lutDimension
-        cubes = DyeCubeCache(dimension: lutDimension, displaySpace: .displayP3, capacity: 4)
+        cubes = DyeCubeCache(dimension: lutDimension, capacity: 4)
     }
 
     // MARK: - LUT

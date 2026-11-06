@@ -199,7 +199,7 @@ export class GLEngine {
     const key = cubeKey(p);
     if (key === this.cubeFor && this.cubeTexture) return;
     const gl = this.gl;
-    const lut = buildLUT(p, this.lutDimension, 'displayP3');
+    const lut = buildLUT(p, this.lutDimension);
     const tex = this.cubeTexture ?? gl.createTexture();
     if (!tex) throw new Error('could not create the cube texture');
     gl.bindTexture(gl.TEXTURE_3D, tex);

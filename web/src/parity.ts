@@ -1,6 +1,7 @@
 // Hooks for test/gl-parity.cjs:
 //   __technichromeParity      renders given scene-linear colours through the WebGL pipeline and returns the
-//                             display-linear P3 result, the same check the app's simulator tests run on Metal;
+//                             display-linear P3 result, the same check the app's simulator tests run on Metal (or,
+//                             with output 'sRGB', what the sRGB canvas is given: the sRGB print, encoded);
 //   __technichromeTiledCheck  prints a synthetic image whole, in tiles and as a windowed crop, and returns how
 //                             far the tiled and cropped results are from the whole-image render (with parameter
 //                             overrides, so the halation glow and the misregistration are covered too);
@@ -18,7 +19,7 @@ import { LIBRAW16_TO_LINEAR, type StoredImage, linearRegion } from './raw/decode
 
 declare global {
   interface Window {
-    __technichromeParity?: (inputs: number[][], parameters: EngineParameters, lutDimension: number) => number[][];
+    __technichromeParity?: (inputs: number[][], parameters: EngineParameters, lutDimension: number, output?: 'linearP3' | 'sRGB') => number[][];
     __technichromeTiledCheck?: (width: number, height: number, tile: number, overrides?: Partial<EngineParameters>) => Promise<{ tiledVsWhole: number; cropVsWhole: number; plainTiledVsWhole: number; halo: number; tiles: number }>;
     __technichromeBloomCheck?: (width: number, height: number, amount: number, threshold: number, radiusPercent: number) => { vsReference: number; effect: number; factor: number };
     __technichromeShiftCheck?: () => { uniform: number; textured: number };
@@ -54,14 +55,14 @@ function maxDiff(a: Float32Array, b: Float32Array): number {
 }
 
 export function installParityHook(engine: GLEngine) {
-  window.__technichromeParity = (inputs, parameters, lutDimension) => {
+  window.__technichromeParity = (inputs, parameters, lutDimension, output = 'linearP3') => {
     const probe = new GLEngine(document.createElement('canvas'), lutDimension);
     const n = inputs.length;
     const rgb = new Float32Array(n * 3);
     inputs.forEach((v, i) => { rgb[i * 3] = v[0]; rgb[i * 3 + 1] = v[1]; rgb[i * 3 + 2] = v[2]; });
     const source = probe.uploadLinear(rgb, n, 1);
     const target = probe.createFloatTarget(n, 1);
-    probe.render(source, parameters, { exposureScale: Math.pow(2, parameters.exposureEV), spatial: false, output: 'linearP3', target });
+    probe.render(source, parameters, { exposureScale: Math.pow(2, parameters.exposureEV), spatial: false, output, target });
     const out = probe.readFloat(target);
     probe.deleteTarget(target);
     probe.deleteSource(source);

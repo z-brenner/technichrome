@@ -6,7 +6,7 @@ import Foundation
 /// tools/colorscience/export_fixtures.py (parameters + expected outputs for a set of inputs), for the shipped
 /// look and for each parameter variant the fixture carries (unequal dye D max; lights, flare and no key).
 final class PythonParityTests: XCTestCase {
-    struct Sample: Decodable { let input: [Double]; let dye: [Double]; let key: Double; let output: [Double] }
+    struct Sample: Decodable { let input: [Double]; let dye: [Double]; let key: Double; let output: [Double]; let outputSRGB: [Double] }
     struct Variant: Decodable { let name: String; let parameters: EngineParameters; let samples: [Sample] }
     struct Fixture: Decodable {
         let parameters: EngineParameters
@@ -26,10 +26,11 @@ final class PythonParityTests: XCTestCase {
     static let densityTolerance = 1e-7
     static let outputTolerance = 1e-6
 
-    /// Checks one block of the fixture; returns the worst density and output errors.
+    /// Checks one block of the fixture; returns the worst density and output errors (the P3 print and the sRGB print).
     func check(_ parameters: EngineParameters, _ samples: [Sample], fixture f: Fixture, name: String) -> (density: Double, output: Double) {
         let space: PrintModel.DisplaySpace = f.displaySpace == "srgb" ? .sRGB : .displayP3
         let pipe = ReferencePipeline(parameters: parameters, lutDimension: f.lutDimension, displaySpace: space)
+        let srgb = ReferencePipeline(parameters: parameters, lutDimension: f.lutDimension, displaySpace: .sRGB)
         var worstDensity = 0.0, worstOutput = 0.0
         for s in samples {
             let input = SIMD3(s.input[0], s.input[1], s.input[2])
@@ -40,9 +41,11 @@ final class PythonParityTests: XCTestCase {
             XCTAssertEqual(key, s.key, accuracy: Self.densityTolerance, "\(name): key density for \(s.input)")
             worstDensity = max(worstDensity, abs(dye.x - s.dye[0]), abs(dye.y - s.dye[1]), abs(dye.z - s.dye[2]), abs(key - s.key))
             let out = pipe.develop(sceneLinear: input)
+            let outSRGB = srgb.develop(sceneLinear: input)
             for i in 0..<3 {
-                worstOutput = max(worstOutput, abs(out[i] - s.output[i]))
+                worstOutput = max(worstOutput, abs(out[i] - s.output[i]), abs(outSRGB[i] - s.outputSRGB[i]))
                 XCTAssertEqual(out[i], s.output[i], accuracy: Self.outputTolerance, "\(name): output channel \(i) for \(s.input)")
+                XCTAssertEqual(outSRGB[i], s.outputSRGB[i], accuracy: Self.outputTolerance, "\(name): sRGB print channel \(i) for \(s.input)")
             }
         }
         return (worstDensity, worstOutput)

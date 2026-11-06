@@ -4,9 +4,9 @@ import XCTest
 /// The baked dye cube: the factorised bake against the print model evaluated directly.
 final class DyeCubeTests: XCTestCase {
     /// Every node of `LUTBuilder.build` must equal `PrintModel.displayLinear` + `softClipGamut` at that node's densities.
-    func worstNodeError(_ p: EngineParameters, dimension: Int, displaySpace: PrintModel.DisplaySpace) -> Double {
-        let lut = LUTBuilder.build(parameters: p, dimension: dimension, displaySpace: displaySpace)
-        let model = PrintModel(parameters: p, displaySpace: displaySpace)
+    func worstNodeError(_ p: EngineParameters, dimension: Int) -> Double {
+        let lut = LUTBuilder.build(parameters: p, dimension: dimension)
+        let model = PrintModel(parameters: p)
         let n = Double(dimension - 1)
         var worst = 0.0
         for b in 0..<dimension {
@@ -25,16 +25,17 @@ final class DyeCubeTests: XCTestCase {
     }
 
     func testFactorisedBakeEqualsDirectEvaluationAtEveryNode() {
-        let shipped = worstNodeError(.default, dimension: 17, displaySpace: .displayP3)
+        let shipped = worstNodeError(.default, dimension: 17)
         XCTAssertLessThan(shipped, 1e-6)
-        // Three different D max (each dye its own transmittance table), another lamp, the sRGB cube.
+        // Three different D max and gains (each dye its own transmittance table and axis), another lamp and base.
         var p = EngineParameters.default
         p.dyeDMax = [3.1, 2.6, 2.3]
+        p.dyeGain = [1.3, 0.8, 1.1]
         p.projectorCCT = 4800
         p.printDMin = 0.1
-        let varied = worstNodeError(p, dimension: 9, displaySpace: .sRGB)
+        let varied = worstNodeError(p, dimension: 9)
         XCTAssertLessThan(varied, 1e-6)
-        print("factorised cube vs direct evaluation: \(shipped) (shipped look, 17³), \(varied) (varied, 9³, sRGB)")
+        print("factorised cube vs direct evaluation: \(shipped) (shipped look, 17³), \(varied) (varied, 9³)")
     }
 }
 

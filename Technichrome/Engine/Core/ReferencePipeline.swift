@@ -24,7 +24,7 @@ public struct ReferencePipeline: Sendable {
         negative = CharacteristicCurve(p.negative)
         matrices = (0..<3).map { CharacteristicCurve(p.matrixCurve($0)) }
         key = CharacteristicCurve(p.key)
-        lut = LUTBuilder.build(parameters: p, dimension: lutDimension, displaySpace: displaySpace)
+        lut = LUTBuilder.build(parameters: p, dimension: lutDimension)   // Display P3; an sRGB print is converted in develop
         self.displaySpace = displaySpace
     }
 
@@ -53,7 +53,8 @@ public struct ReferencePipeline: Sendable {
         return (dye, k)
     }
 
-    /// Full per-pixel develop (no spatial stages). Returns display-linear RGB in `displaySpace`, [0,1].
+    /// Full per-pixel develop (no spatial stages). Returns display-linear RGB in `displaySpace`, [0,1]: the Display P3
+    /// print, or for `.sRGB` that print converted by `PrintModel.sRGBPrint`.
     public func develop(sceneLinear rgb: SIMD3<Double>) -> SIMD3<Double> {
         let (dye, k) = densities(sceneLinear: rgb)
         var out = lut.lookup(dye) * pow(10.0, -k)
@@ -61,6 +62,6 @@ public struct ReferencePipeline: Sendable {
         if f > 0 { out = (out + SIMD3(repeating: f)) / (1 + f) }   // projection flare: white stays white
         let g = parameters.surroundExponent
         out = SIMD3(pow(min(max(out.x, 0), 1), g), pow(min(max(out.y, 0), 1), g), pow(min(max(out.z, 0), 1), g))
-        return out
+        return displaySpace == .sRGB ? PrintModel.sRGBPrint(out) : out
     }
 }

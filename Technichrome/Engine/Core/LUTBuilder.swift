@@ -3,7 +3,7 @@
 //  Technichrome
 //
 //  Bakes the spectral print model into a 3D lookup table indexed by normalised dye densities
-//  (cyan → R axis, magenta → G axis, yellow → B axis) and returning gamut-clipped display-linear RGB.
+//  (cyan → R axis, magenta → G axis, yellow → B axis) and returning gamut-clipped display-linear Display P3.
 //  Each axis spans [0, gain · D max] of its dye, the most of it the print carries, so the three dyes reach
 //  the cube's edge together (ReferencePipeline.densities normalises the same way).
 //  Layout matches CIColorCube: RGBA Float32, red (cyan) varying fastest, then green, then blue.
@@ -57,8 +57,8 @@ public enum LUTBuilder {
     /// it to 1e-6). Measured in a release build on a shared x86 Linux machine, not on a phone: 33³ in about 4 ms
     /// and 65³ in about 36 ms (95 wavelengths), where evaluating every node directly took about 29 ms and 250 ms
     /// on the 71-wavelength grid used before Round 25.
-    public static func build(parameters p: EngineParameters, dimension: Int = 33, displaySpace: PrintModel.DisplaySpace = .displayP3) -> DyeLUT {
-        let model = PrintModel(parameters: p, displaySpace: displaySpace)
+    public static func build(parameters p: EngineParameters, dimension: Int = 33) -> DyeLUT {
+        let model = PrintModel(parameters: p)
         let samples = Spectral.sampleCount
         let n = Double(dimension - 1)
         /// 10^−(j/n · Dmax · gain · a(λᵢ)) for dye `k`, node j major.

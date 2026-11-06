@@ -19,17 +19,16 @@ public final class DyeCubeCache: @unchecked Sendable {
     }
 
     public let dimension: Int
-    public let displaySpace: PrintModel.DisplaySpace
     public let capacity: Int
 
     private let lock = NSLock()
     private var entries: [(key: PrintModelKey, cube: Cube)] = []   // most recently used first
     private var bakes = 0
 
-    public init(dimension: Int = 33, displaySpace: PrintModel.DisplaySpace = .displayP3, capacity: Int = 4) {
+    /// Cubes are Display P3, the print model's only space (an sRGB print is converted from the finished P3 print).
+    public init(dimension: Int = 33, capacity: Int = 4) {
         precondition(capacity > 0, "a cube cache holds at least one cube")
         self.dimension = dimension
-        self.displaySpace = displaySpace
         self.capacity = capacity
     }
 
@@ -37,7 +36,7 @@ public final class DyeCubeCache: @unchecked Sendable {
     public func cube(for p: EngineParameters) -> Cube {
         let key = PrintModelKey(p)
         if let cube = cached(key) { return cube }
-        let lut = LUTBuilder.build(parameters: p, dimension: dimension, displaySpace: displaySpace)
+        let lut = LUTBuilder.build(parameters: p, dimension: dimension)
         let cube = Cube(data: lut.data.withUnsafeBufferPointer { Data(buffer: $0) }, dimension: lut.dimension)
         return keep(cube, for: key)
     }

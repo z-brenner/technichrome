@@ -204,6 +204,16 @@ in by scaling chroma toward luminance, never by clipping channels. A theatrical 
 a dark surround; viewed on a phone in daylight it reads too contrasty, so a mild viewing-condition
 exponent (0.92) is applied — a small nod to Bartleson–Breneman, not a full appearance model.
 
+**The sRGB print.** Where a print has to be shown in sRGB (a browser without a P3 canvas, the
+figures below), it is the finished P3 print (key, flare and exponent applied) converted to sRGB and
+brought into sRGB by the same chroma-toward-luminance clip, weighted by Rec. 709 luminance
+(`srgb_print` in the prototype, `PrintModel.sRGBPrint`, `srgbPrint`, the web's sRGB canvas). Until
+Round 25 there were two: the prototype's sRGB mode, used for the figures, baked the cube in sRGB,
+clipped it with P3 weights and applied key and exponent to sRGB channels, while the web's sRGB canvas
+did as above. A power per channel does not commute with the matrix, so they differed by up to 0.67
+ΔE00. The cube is now always P3, and the fixture carries the sRGB print of every sample, which the
+Swift core, the web port and the WebGL canvas path reproduce.
+
 ### Spatial stages — approximation grounded in the process
 
 * **Dye diffusion**: the dye images are blurred by σ ≈ 1.1 px (at a 4000 px long edge); the silver
@@ -256,7 +266,7 @@ exponent (0.92) is applied — a small nod to Bartleson–Breneman, not a full a
 ## Figures
 
 Synthetic charts rendered by `tools/colorscience/make_charts.py` with the shipped parameters (left: scene
-values encoded as plain sRGB; right: the Technichrome print):
+values encoded as plain sRGB; right: the Technichrome print, as the sRGB print), regenerated in Round 25:
 
 * `docs/figures/colorchecker_before_after.png` — the 24 ColorChecker patches.
 * `docs/figures/hue_sweep_before_after.png` — hue × saturation × value sweep.

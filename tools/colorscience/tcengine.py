@@ -10,7 +10,8 @@ Pipeline (per pixel, scene-linear sRGB-primaries RGB in, display-linear RGB out)
   5. key image           Dk = key_curve(log10(10^-Dn_green)) * key        (silver positive from the green record)
   6. spectral print      T(λ) = 10^-(Σ Dd_i a_i(λ) + Dk + Dmin)           (transmittance of the dye-transfer print)
   7. projection          XYZ = ∫ P(λ) T(λ) cmf(λ) dλ, adapted to D65      (carbon-arc projector, eye adapted to screen white)
-  8. display             P3/sRGB linear, surround compensation, soft gamut clip
+  8. display             P3 linear, surround compensation, soft gamut clip; an sRGB print is that P3 print
+                         converted to sRGB and soft-clipped again with Rec. 709 weights (srgb_print)
 
 Steps 1–5 are cheap analytic per-pixel maths (they live in the Metal kernels on device);
 steps 6–7 are baked into a 3D LUT indexed by the three normalised dye densities (each dye's
@@ -233,7 +234,7 @@ class EngineParams:
     timing_strength: float = 0.6
     timing_target: float = 0.16
     timing_limit: float = 1.25
-    display: str = 'p3'                        # 'p3' or 'srgb'
+    display: str = 'p3'                        # 'p3', or 'srgb': the P3 print converted by srgb_print
     # spatial (not part of the per-pixel maths; documented here so the preset is complete)
     diffusion_sigma_px_at_4k: float = 1.1      # dye bleed in the gelatin, σ in px for a 4000 px long edge
     bloom_amount: float = 0.0                  # optional negative halation / highlight glow
@@ -270,7 +271,9 @@ class Engine:
         self.white_scale = 1.0 / white_xyz[1]
         src_white = white_xyz * self.white_scale
         self.cat = S.bradford_cat(src_white, S.xy_to_xyz(S.D65_xy))
-        self.xyz_to_display = (S.XYZ_TO_P3 if p.display == 'p3' else S.XYZ_TO_SRGB) @ self.cat
+        # The print, and so the cube, is always Display P3: an sRGB print is the finished P3 print converted
+        # (srgb_print), never a cube baked in sRGB, so the key, flare and surround act on the same channels either way.
+        self.xyz_to_display = S.XYZ_TO_P3 @ self.cat
 
     def print_xyz(self, dye_density):
         """dye_density: (..., 3) absolute peak densities of cyan, magenta, yellow → XYZ relative to print white (Y_white = 1)."""
@@ -384,6 +387,12 @@ class Engine:
     def develop(self, rgb_linear, use_lut=True):
         """Full per-pixel develop (no spatial stages). Returns display-linear RGB in the chosen display space, [0,1]."""
         norm, key = self.densities(rgb_linear)
+        return self.print_densities(norm, key, use_lut)
+
+    def print_densities(self, norm, key, use_lut=True):
+        """Normalised dye densities and key density → the print: the cube (or, without it, the print model evaluated
+        directly), the key, the screen flare and the viewing exponent, in Display P3; with display='srgb' that print is
+        then converted by srgb_print. develop() is densities() and this; develop_dng.develop_image blurs in between."""
         if use_lut:
             rgb = self.lut_lookup(norm)
         else:
@@ -393,7 +402,7 @@ class Engine:
             f = self.p.screen_flare
             rgb = (rgb + f) / (1.0 + f)             # projection flare: white stays white, black lifts to f/(1+f)
         rgb = np.power(np.clip(rgb, 0.0, 1.0), self.p.surround_exponent)
-        return rgb
+        return srgb_print(rgb) if self.p.display == 'srgb' else rgb
 
 
 def timing_exposure_ev(geometric_mean, target, strength, limit, camera_bias_ev=0.0):
@@ -413,10 +422,17 @@ def geometric_mean_luminance(rgb_linear):
     return float(2.0 ** np.mean(np.log2(np.maximum(y, 1e-6))))
 
 
-def soft_clip_gamut(rgb):
+# Luminance weights of the soft clip, rounded as every implementation writes them: the Y row of Display P3 → XYZ, and
+# of sRGB (Rec. 709 primaries) → XYZ, both D65.
+P3_LUMA = (0.2290, 0.6917, 0.0793)
+REC709_LUMA = (0.2126, 0.7152, 0.0722)
+
+
+def soft_clip_gamut(rgb, luma=P3_LUMA):
     """Bring out-of-gamut colours inside [0,1]: negative components are lifted by desaturating toward
-    the pixel's luminance (chroma scaling), then values > 1 are compressed with a soft knee."""
-    Y = rgb @ np.array([0.2290, 0.6917, 0.0793])  # P3 luminance weights (close enough for sRGB too)
+    the pixel's luminance (chroma scaling), then values > 1 are compressed with a soft knee. `luma` are the
+    luminance weights of the space `rgb` is in (P3 for the cube, Rec. 709 for the sRGB print)."""
+    Y = rgb @ np.array(luma)
     Y = Y[..., None]
     mn = rgb.min(axis=-1, keepdims=True)
     # chroma scale factor so that min component reaches 0 (only where negative)
@@ -427,6 +443,14 @@ def soft_clip_gamut(rgb):
     over = rgb > k
     rgb = np.where(over, k + (1 - k) * np.tanh((rgb - k) / (1 - k)), rgb)
     return np.clip(rgb, 0.0, 1.0)
+
+
+def srgb_print(p3):
+    """The sRGB print, one definition for every place that shows one (the web's sRGB canvas, the documentation
+    figures, display='srgb', PrintModel's sRGB space in the app and the web): the finished display-linear Display P3
+    print (after key, flare and the viewing exponent) converted to linear sRGB, then brought into sRGB with the same
+    soft clip, weighted by Rec. 709 luminance."""
+    return soft_clip_gamut(S.apply_matrix(S.P3_TO_SRGB, np.asarray(p3, dtype=np.float64)), REC709_LUMA)
 
 
 if __name__ == '__main__':

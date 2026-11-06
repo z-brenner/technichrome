@@ -8,9 +8,9 @@ import { ReferencePipeline } from '../src/engine/reference';
 import { TECHNICHROME_V1, parametersFromJSON, type EngineParameters } from '../src/engine/parameters';
 import { timingExposureEV, geometricMeanLuminance } from '../src/engine/timing';
 import { CMF_TABLE, WAVELENGTHS, dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, xyzOf, SRGB_TO_XYZ, P3_TO_SRGB, P3_TO_XYZ, SRGB_TO_P3 } from '../src/engine/spectral';
-import { type DisplaySpace, PrintModel, buildLUT, lookupLUT, softClipGamut } from '../src/engine/printModel';
+import { PrintModel, buildLUT, lookupLUT, softClipGamut } from '../src/engine/printModel';
 
-interface Sample { input: number[]; dye: number[]; key: number; output: number[] }
+interface Sample { input: number[]; dye: number[]; key: number; output: number[]; outputSRGB: number[] }
 interface Fixture {
   parameters: EngineParameters;
   lutDimension: number;
@@ -31,14 +31,17 @@ describe('parity with the Python prototype', () => {
 
   it.each(blocks.map((b) => [b.name, b] as const))('reproduces dye densities, key density and output on every fixture sample (%s)', (name, block) => {
     const pipe = new ReferencePipeline(block.parameters, fixture.lutDimension, fixture.displaySpace === 'p3' ? 'displayP3' : 'sRGB');
+    const srgb = new ReferencePipeline(block.parameters, fixture.lutDimension, 'sRGB');   // the sRGB print: the P3 print converted
     let worst = 0;
     for (const s of block.samples) {
       const { dye, key } = pipe.densities(s.input as [number, number, number]);
       const out = pipe.develop(s.input as [number, number, number]);
+      const outSRGB = srgb.develop(s.input as [number, number, number]);
       for (let c = 0; c < 3; c++) {
         expect(Math.abs(dye[c] - s.dye[c])).toBeLessThan(1e-7);
         expect(Math.abs(out[c] - s.output[c])).toBeLessThan(1e-6);
-        worst = Math.max(worst, Math.abs(out[c] - s.output[c]));
+        expect(Math.abs(outSRGB[c] - s.outputSRGB[c])).toBeLessThan(1e-6);
+        worst = Math.max(worst, Math.abs(out[c] - s.output[c]), Math.abs(outSRGB[c] - s.outputSRGB[c]));
       }
       expect(Math.abs(key - s.key)).toBeLessThan(1e-7);
     }
@@ -142,9 +145,9 @@ describe('transfer functions and matrices', () => {
   });
 
   it('bakes the factorised cube equal to the print model evaluated at every node', () => {
-    const worstNode = (p: EngineParameters, dim: number, space: DisplaySpace) => {
-      const lut = buildLUT(p, dim, space);
-      const model = new PrintModel(p, space);
+    const worstNode = (p: EngineParameters, dim: number) => {
+      const lut = buildLUT(p, dim);
+      const model = new PrintModel(p);
       const n = dim - 1;
       let worst = 0;
       for (let b = 0; b < dim; b++) for (let g = 0; g < dim; g++) for (let r = 0; r < dim; r++) {
@@ -155,9 +158,9 @@ describe('transfer functions and matrices', () => {
       }
       return worst;
     };
-    expect(worstNode(TECHNICHROME_V1, 17, 'displayP3')).toBeLessThan(1e-6);
-    // Three different D max (each dye its own transmittance table), another lamp, the sRGB cube.
-    expect(worstNode({ ...TECHNICHROME_V1, dyeDMax: [3.1, 2.6, 2.3], projectorCCT: 4800, printDMin: 0.1 }, 9, 'sRGB')).toBeLessThan(1e-6);
+    expect(worstNode(TECHNICHROME_V1, 17)).toBeLessThan(1e-6);
+    // Three different D max and gains (each dye its own transmittance table and axis), another lamp and base.
+    expect(worstNode({ ...TECHNICHROME_V1, dyeDMax: [3.1, 2.6, 2.3], dyeGain: [1.3, 0.8, 1.1], projectorCCT: 4800, printDMin: 0.1 }, 9)).toBeLessThan(1e-6);
   });
 });
 

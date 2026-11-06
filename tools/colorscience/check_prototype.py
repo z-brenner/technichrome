@@ -22,10 +22,16 @@ def check_parameters(current, fixture_parameters):
 
 
 def worst_output_error(eng, samples):
+    """Worst error over the fixture's P3 outputs and its sRGB prints; the sRGB print through display='srgb' must be
+    the same as srgb_print of the P3 print (one definition)."""
+    srgb_engine = T.Engine(T.EngineParams(**{**eng.p.__dict__, 'display': 'srgb'}), dyes=eng.dyes, lut_size=eng.lut_size)
     worst = 0.0
     for s in samples:
-        out = eng.develop(np.array([s['input']]))[0]
-        worst = max(worst, float(np.max(np.abs(out - np.array(s['output'])))))
+        a = np.array([s['input']])
+        out = eng.develop(a)[0]
+        srgb = srgb_engine.develop(a)[0]
+        worst = max(worst, float(np.max(np.abs(out - np.array(s['output'])))), float(np.max(np.abs(srgb - np.array(s['outputSRGB'])))))
+        assert np.array_equal(srgb, T.srgb_print(out)), "display='srgb' is not srgb_print of the P3 print"
     return worst
 
 

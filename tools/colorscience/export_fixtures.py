@@ -1,5 +1,5 @@
 """Export (a) the engine parameters in the Swift EngineParameters JSON schema and (b) a parity fixture
-(inputs → dye densities, key density, outputs) so the Swift unit tests can verify the port: one block for the
+(inputs → dye densities, key density, outputs in Display P3 and as the sRGB print) so the Swift unit tests can verify the port: one block for the
 shipped look and one for each parameter variant in VARIANTS, on the same inputs.
 
 usage: python3 export_fixtures.py ../../Tests/TechnichromeCoreTests/Fixtures/parity.json [--web ../../web/src/engine]
@@ -96,7 +96,9 @@ def fixture_samples(eng, inputs):
         a = np.array([inp], dtype=np.float64)
         norm, key = eng.densities(a)
         out = eng.develop(a)
-        samples.append({"input": [float(v) for v in inp], "dye": [float(v) for v in norm[0]], "key": float(key[0]), "output": [float(v) for v in out[0]]})
+        srgb = T.srgb_print(out)   # the sRGB print: the P3 print converted, soft-clipped with Rec. 709 weights
+        samples.append({"input": [float(v) for v in inp], "dye": [float(v) for v in norm[0]], "key": float(key[0]), "output": [float(v) for v in out[0]],
+                        "outputSRGB": [float(v) for v in srgb[0]]})
     return samples
 
 

@@ -12,12 +12,12 @@ if len(sys.argv) > 2:
     for k, v in json.load(open(sys.argv[2])).items():
         if hasattr(params, k):
             setattr(params, k, tuple(v) if isinstance(v, list) else v)
-params.display = 'srgb'   # charts are viewed in an sRGB viewer
 eng = T.Engine(params, lut_size=33)
 
 
 def develop(lin):
-    return eng.develop(np.asarray(lin, dtype=np.float64))
+    """The print as an sRGB viewer shows it: the P3 print converted by srgb_print, as the web's sRGB canvas does."""
+    return T.srgb_print(eng.develop(np.asarray(lin, dtype=np.float64)))
 
 
 cc = C.colorchecker_linear(white_scale=1.0)
@@ -34,5 +34,5 @@ print("ColorChecker (scene sRGB8 -> developed sRGB8):")
 d8 = (S.srgb_encode(develop(cc)) * 255 + 0.5).astype(int)
 o8 = (S.srgb_encode(np.clip(cc, 0, 1)) * 255 + 0.5).astype(int)
 for (name, _), o, d in zip(C.COLORCHECKER_SRGB8, o8, d8):
-    print(f"  {name:14s} {tuple(o)} -> {tuple(d)}")
+    print(f"  {name:14s} {tuple(int(v) for v in o)} -> {tuple(int(v) for v in d)}")
 print('charts written to', out_dir)

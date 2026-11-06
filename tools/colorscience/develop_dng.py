@@ -31,7 +31,8 @@ def decode_linear(path, max_edge=1600):
 
 
 def develop_image(lin, engine: T.Engine, diffusion_sigma=None, bloom=None):
-    """Full develop including spatial stages (dye diffusion of the density image; the key stays sharp)."""
+    """Full develop including spatial stages (dye diffusion of the density image; the key stays sharp). Returns the
+    print in the engine's display space (Display P3 unless display='srgb')."""
     p = engine.p
     h, w = lin.shape[:2]
     E = lin
@@ -46,15 +47,13 @@ def develop_image(lin, engine: T.Engine, diffusion_sigma=None, bloom=None):
         diffusion_sigma = p.diffusion_sigma_px_at_4k * max(h, w) / 4000.0
     if diffusion_sigma > 0.05:
         norm = np.stack([gaussian_filter(norm[..., i], diffusion_sigma) for i in range(3)], axis=-1)
-    rgb = engine.lut_lookup(norm)
-    rgb = rgb * (10.0 ** (-key))[..., None]
-    rgb = np.power(np.clip(rgb, 0, 1), p.surround_exponent)
-    return rgb
+    return engine.print_densities(norm, key)
 
 
 def to_png8(rgb_linear, out_space='srgb'):
+    """8-bit sRGB PNG data of linear RGB in `out_space`: 'srgb' as it is, 'p3' (a print) as the sRGB print."""
     if out_space == 'p3':
-        rgb_linear = S.apply_matrix(S.P3_TO_SRGB, rgb_linear)  # view P3 output in an sRGB viewer (clipped)
+        rgb_linear = T.srgb_print(rgb_linear)   # the P3 print as an sRGB browser shows it
     return Image.fromarray((S.srgb_encode(np.clip(rgb_linear, 0, 1)) * 255 + 0.5).astype(np.uint8))
 
 

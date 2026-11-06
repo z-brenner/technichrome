@@ -1,8 +1,9 @@
 // GPU parity: the WebGL pipeline of the built site must agree with the Python fixture (and therefore the
 // Swift core and the Metal kernels) on every fixture colour, for the shipped look and each parameter variant the
-// fixture carries (unequal dye D max; lights, flare and no key): within 5e-4 absolute (the half-float density
-// targets alone account for up to about 2e-4) and 0.1 ΔE00 per colour, since an absolute bound alone would let
-// a shadow move by more than a just-noticeable difference. Serves dist/ with the isolation headers, opens it in
+// fixture carries: within 5e-4 absolute (the half-float density targets alone account for up to about 2e-4) and
+// 0.1 ΔE00 per colour, since an absolute bound alone would let a shadow move by more than a just-noticeable
+// difference. Both outputs: the linear P3 print, and the sRGB canvas's sRGB print (decoded here), which must be the
+// fixture's sRGB print (the P3 print converted and soft-clipped with Rec. 709 weights, one definition everywhere). Serves dist/ with the isolation headers, opens it in
 // headless Chromium, calls the parity hook.
 const { chromium } = require('playwright');
 const http = require('node:http');
@@ -16,9 +17,11 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 // CIELAB of display-linear Display P3 (D65, white Y = 1) and CIEDE2000 with kL = kC = kH = 1 (Sharma, Wu & Dalal,
 // Color Res. Appl. 30(1), 2005). P3 → XYZ is the matrix the engine derives from the P3 primaries and D65.
 const P3_TO_XYZ = [[0.4865709486482, 0.2656676931691, 0.1982172852344], [0.2289745640697, 0.6917385218365, 0.0792869140937], [0, 0.0451133818589, 1.043944368901]];
+const SRGB_TO_XYZ = [[0.412390799266, 0.3575843393839, 0.1804807884018], [0.2126390058715, 0.7151686787678, 0.0721923153607], [0.0193308187156, 0.1191947797946, 0.9505321522497]];
 const WHITE = P3_TO_XYZ.map((row) => row[0] + row[1] + row[2]);
-function p3ToLab(rgb) {
-  const f = P3_TO_XYZ.map((row, i) => {
+const srgbDecode = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+function p3ToLab(rgb, toXYZ = P3_TO_XYZ) {
+  const f = toXYZ.map((row, i) => {
     const t = (row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2]) / WHITE[i];
     return t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
   });
@@ -78,18 +81,23 @@ const server = http.createServer((req, res) => {
   const results = [];
   for (const block of blocks) {
     const inputs = block.samples.map((s) => s.input);
-    const outputs = await page.evaluate(([i, p, d]) => window.__technichromeParity(i, p, d), [inputs, block.parameters, fixture.lutDimension]);
-    let worst = 0, worstIndex = -1, worstDE = 0, worstDEIndex = -1;
-    outputs.forEach((o, i) => {
-      const expected = block.samples[i].output;
-      for (let c = 0; c < 3; c++) {
-        const err = Math.abs(o[c] - expected[c]);
-        if (err > worst) { worst = err; worstIndex = i; }
-      }
-      const de = deltaE2000(p3ToLab(o), p3ToLab(expected));
-      if (de > worstDE) { worstDE = de; worstDEIndex = i; }
-    });
-    results.push({ block, outputs, worst, worstIndex, worstDE, worstDEIndex });
+    for (const output of ['linearP3', 'sRGB']) {
+      const srgb = output === 'sRGB';
+      const raw = await page.evaluate(([i, p, d, o]) => window.__technichromeParity(i, p, d, o), [inputs, block.parameters, fixture.lutDimension, output]);
+      const outputs = srgb ? raw.map((o) => o.map(srgbDecode)) : raw;   // the sRGB canvas is given encoded values
+      let worst = 0, worstIndex = -1, worstDE = 0, worstDEIndex = -1;
+      outputs.forEach((o, i) => {
+        const expected = srgb ? block.samples[i].outputSRGB : block.samples[i].output;
+        for (let c = 0; c < 3; c++) {
+          const err = Math.abs(o[c] - expected[c]);
+          if (err > worst) { worst = err; worstIndex = i; }
+        }
+        const toXYZ = srgb ? SRGB_TO_XYZ : P3_TO_XYZ;
+        const de = deltaE2000(p3ToLab(o, toXYZ), p3ToLab(expected, toXYZ));
+        if (de > worstDE) { worstDE = de; worstDEIndex = i; }
+      });
+      results.push({ block, output, outputs, worst, worstIndex, worstDE, worstDEIndex });
+    }
   }
   // Tiled and windowed rendering must reproduce the whole-image render: a synthetic image printed whole, in 96 px
   // tiles with their blur halo, and as a crop through a window, compared in float.
@@ -105,7 +113,7 @@ const server = http.createServer((req, res) => {
   server.close();
   const tolerance = 5e-4, deTolerance = 0.1;
   for (const r of results) {
-    console.log(`GPU vs Python fixture (${r.block.name}): worst error ${r.worst.toExponential(2)} on sample ${r.worstIndex} (tolerance ${tolerance}), ` +
+    console.log(`GPU vs Python fixture (${r.block.name}, ${r.output === 'sRGB' ? 'sRGB print' : 'P3'}): worst error ${r.worst.toExponential(2)} on sample ${r.worstIndex} (tolerance ${tolerance}), ` +
       `worst ΔE00 ${r.worstDE.toFixed(4)} on sample ${r.worstDEIndex} (tolerance ${deTolerance})`);
   }
   console.log(`isolation ok; ${errors.length} page errors`);
@@ -126,9 +134,10 @@ const server = http.createServer((req, res) => {
   const shiftOk = shift.uniform < 0.01 && shift.textured > 0.001;
   if (!shiftOk) console.log('misregistration moved a uniform image, or did nothing to a textured one');
   for (const r of failed) {
-    console.log(`${r.block.name} does not match the fixture:`);
+    console.log(`${r.block.name} (${r.output}) does not match the fixture:`);
     for (let i = 0; i < Math.min(6, r.outputs.length); i++) {
-      console.log(`  sample ${i} input ${JSON.stringify(r.block.samples[i].input)} gpu ${r.outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${r.block.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
+      const expected = r.output === 'sRGB' ? r.block.samples[i].outputSRGB : r.block.samples[i].output;
+      console.log(`  sample ${i} input ${JSON.stringify(r.block.samples[i].input)} gpu ${r.outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${expected.map((v) => v.toFixed(4)).join(',')}`);
     }
   }
   if (errors.length) console.log(errors.join('\n'));
