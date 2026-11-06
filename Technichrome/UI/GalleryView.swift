@@ -134,12 +134,8 @@ struct GalleryView: View {
         Task {
             do {
                 let url = try result.get()
-                let data = try await Task.detached(priority: .userInitiated) { () throws -> Data in
-                    let secured = url.startAccessingSecurityScopedResource()
-                    defer { if secured { url.stopAccessingSecurityScopedResource() } }
-                    return try Data(contentsOf: url)
-                }.value
-                try await importData(data)
+                // Mapped and copied, not read into memory (PhotoStore.add(importedFileAt:)).
+                developImported(try await model.store.add(importedFileAt: url))
             } catch {
                 importError = error.localizedDescription
             }
@@ -147,7 +143,10 @@ struct GalleryView: View {
     }
 
     private func importData(_ data: Data) async throws {
-        let record = try await model.store.add(importedData: data)
+        developImported(try await model.store.add(importedData: data))
+    }
+
+    private func developImported(_ record: PhotoRecord) {
         Haptics.tick()
         model.developing = record
     }

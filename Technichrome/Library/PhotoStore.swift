@@ -166,10 +166,38 @@ public final class PhotoStore {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
         }.value
+        return try register(info, id: id)
+    }
+
+    /// Adds a file chosen in Files without reading it into memory: it is mapped for the tag inspection (which
+    /// reads only the header and the tags) and copied by the file system. A 48 MP ProRAW is up to about 100 MB,
+    /// which was read whole, inspected and written out again.
+    @discardableResult
+    public func add(importedFileAt url: URL) async throws -> PhotoRecord {
+        let id = UUID()
+        let dir = folder(for: id)
+        let info = try await Task.detached(priority: .userInitiated) { () throws -> ImportedFile in
+            let secured = url.startAccessingSecurityScopedResource()
+            defer { if secured { url.stopAccessingSecurityScopedResource() } }
+            let info = try ImportedFile(data: Data(contentsOf: url, options: .mappedIfSafe))
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: url, to: dir.appendingPathComponent(info.fileName))
+            } catch {
+                try? FileManager.default.removeItem(at: dir)     // no half-imported folder
+                throw error
+            }
+            return info
+        }.value
+        return try register(info, id: id)
+    }
+
+    /// The undeveloped record of an imported file, saved and listed first.
+    private func register(_ info: ImportedFile, id: UUID) throws -> PhotoRecord {
         let record = PhotoRecord(id: id, capturedAt: info.capturedAt ?? Date(), rawKind: info.rawKind, lens: .wide,
                                  pixelWidth: info.pixelWidth, pixelHeight: info.pixelHeight, cameraModel: info.cameraModel,
                                  iso: info.iso, exposureDuration: info.exposureDuration, exposureBias: 0, baselineExposure: 0,
-                                 printExposureEV: 0, parameters: nil, isDeveloped: false, originalFile: fileName)
+                                 printExposureEV: 0, parameters: nil, isDeveloped: false, originalFile: info.fileName)
         try save(record)
         records.insert(record, at: 0)
         return record
