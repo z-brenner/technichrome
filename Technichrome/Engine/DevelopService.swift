@@ -120,6 +120,18 @@ public final class DevelopService: @unchecked Sendable {
                                       limit: p.timingLimit, cameraBiasEV: cameraBiasEV)
     }
 
+    /// The print timing of `p` on a photograph. The stored value was measured at develop time with that time's
+    /// parameters: it is kept while the parameters the timing depends on (print exposure, timing strength,
+    /// target and limit) are unchanged, and measured again on `linear` (the quick decode, as at develop time)
+    /// when they are not, so a look tuned in the Laboratory, its re-develop and its record agree.
+    public func printTiming(for record: PhotoRecord, parameters p: EngineParameters, linear: CIImage, baselineEV: Double) -> Double {
+        if let q = record.parameters, q.exposureEV == p.exposureEV, q.timingStrength == p.timingStrength,
+           q.timingTarget == p.timingTarget, q.timingLimit == p.timingLimit {
+            return record.printTimingEV
+        }
+        return measureTiming(linear: linear, baselineEV: baselineEV, parameters: p, cameraBiasEV: Double(record.exposureBias))
+    }
+
     public func render(_ image: CIImage) -> CGImage? {
         context.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: TechnichromeEngine.outputColorSpace)
     }
