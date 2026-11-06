@@ -38,23 +38,62 @@ public final class DevelopService: @unchecked Sendable {
         self.context = CIContext.technichrome()
     }
 
+    /// Long edge of the quick decodes (the develop reveal, the Laboratory), in pixels. A cap on top of the
+    /// quarter scale: a 12 MP original decodes at a quarter as before, a 48 MP one no longer at 2016 px.
+    public static let quickLongEdge: CGFloat = 1024
+
     /// The scene-linear source for a record: RAW through the linear decoder, or a HEIF linearised by Core Image.
-    public func linearSource(for record: PhotoRecord, store: PhotoStore, scaleFactor: Float = 1.0, draft: Bool = false) throws -> (CIImage, Double) {
+    /// `maxLongEdge` lowers the scale further for large originals.
+    public func linearSource(for record: PhotoRecord, store: PhotoStore, scaleFactor: Float = 1.0, draft: Bool = false,
+                             maxLongEdge: CGFloat? = nil) throws -> (CIImage, Double) {
         let url = store.originalURL(for: record)
         if record.hasRAW {
             var opts = RAWDeveloper.Options.adaptive(iso: record.iso)
             opts.scaleFactor = scaleFactor
             opts.draftMode = draft
             let dev = try RAWDeveloper(url: url, options: opts)
+            let native = max(dev.info.nativeSize.width, dev.info.nativeSize.height)
+            if let maxLongEdge, native > 0 { dev.filter.scaleFactor = min(scaleFactor, Float(maxLongEdge / native)) }
             guard let img = dev.linearImage else { throw RAWDeveloperError.unsupportedRAW }
             return (img, dev.info.baselineExposure)
         } else {
             guard var img = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else { throw RAWDeveloperError.unsupportedRAW }
-            if scaleFactor < 1 {
-                img = img.transformed(by: CGAffineTransform(scaleX: CGFloat(scaleFactor), y: CGFloat(scaleFactor)))
+            var scale = CGFloat(scaleFactor)
+            let native = max(img.extent.width, img.extent.height)
+            if let maxLongEdge, native > 0 { scale = min(scale, maxLongEdge / native) }
+            if scale < 1 {
+                img = img.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
             }
             return (img, 0)
         }
+    }
+
+    /// The quick decode the develop reveal and the Laboratory work from: a quarter scale (at most
+    /// `quickLongEdge`), draft mode, rendered once into a buffer. A CIImage from CIRAWFilter is a recipe, so
+    /// demosaic, noise reduction and lens correction would otherwise run again on every render of it: five
+    /// times in the reveal, once per slider movement in the Laboratory.
+    public func quickSource(for record: PhotoRecord, store: PhotoStore) throws -> (CIImage, Double) {
+        let (linear, baseline) = try linearSource(for: record, store: store, scaleFactor: 0.25, draft: true, maxLongEdge: Self.quickLongEdge)
+        return (materialize(linear), baseline)
+    }
+
+    /// Renders an image once into a half-float RGBA buffer in the working space and returns an image backed by
+    /// that buffer, at the same extent. RGBAh is the context's own working format, so values above 1 and below 0
+    /// survive as they do between kernels (WWDC21 10160 renders ProRAW's linear output the same way).
+    public func materialize(_ image: CIImage) -> CIImage {
+        let r = image.extent.integral
+        guard !r.isInfinite, r.width > 0, r.height > 0 else { return image }
+        let width = Int(r.width), height = Int(r.height)
+        let rowBytes = width * 8                       // four half floats per pixel
+        var data = Data(count: rowBytes * height)
+        data.withUnsafeMutableBytes { buffer in
+            guard let base = buffer.baseAddress else { return }
+            context.render(image, toBitmap: base, rowBytes: rowBytes, bounds: r, format: .RGBAh,
+                           colorSpace: TechnichromeEngine.workingColorSpace)
+        }
+        return CIImage(bitmapData: data, bytesPerRow: rowBytes, size: r.size, format: .RGBAh,
+                       colorSpace: TechnichromeEngine.workingColorSpace)
+            .transformed(by: CGAffineTransform(translationX: r.minX, y: r.minY))
     }
 
     public func makePrint(linear: CIImage, baselineEV: Double, parameters: EngineParameters, extraEV: Double,

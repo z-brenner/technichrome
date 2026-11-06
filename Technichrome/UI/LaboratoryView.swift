@@ -18,7 +18,8 @@ struct LaboratoryView: View {
 
     @State private var params: EngineParameters = .default
     @State private var preview: CGImage?
-    @State private var linearCache: (CIImage, Double, Double)?   // image, baseline, long edge
+    /// The materialised quick decode (DevelopService.quickSource): image, baseline, long edge.
+    @State private var linearCache: (CIImage, Double, Double)?
     @State private var renderTask: Task<Void, Never>?
     @State private var busy = false
     /// Why the photograph could not be opened or rendered (shown in place of the preview).
@@ -138,7 +139,8 @@ struct LaboratoryView: View {
         let store = model.store
         Task.detached(priority: .userInitiated) {
             do {
-                let (img, baseline) = try dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true)
+                // Decoded once and materialised: each slider movement then renders the engine only, not the RAW decoder.
+                let (img, baseline) = try dev.quickSource(for: record, store: store)
                 let longEdge = Double(max(img.extent.width, img.extent.height))
                 await MainActor.run {
                     linearCache = (img, baseline, longEdge)

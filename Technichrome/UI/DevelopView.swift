@@ -156,11 +156,25 @@ struct DevelopView: View {
         let params = model.parameters
         let store = model.store
         let rec = record
-        // Print timing and quick preview stages at reduced scale
-        let (stages, timing) = await Task.detached(priority: .userInitiated) { () -> ([Stage: CGImage], Double) in
-            do {
-                let (linear, baseline) = try dev.linearSource(for: rec, store: store, scaleFactor: 0.25, draft: true)
-                let timing = dev.measureTiming(linear: linear, baselineEV: baseline, parameters: params, cameraBiasEV: Double(rec.exposureBias))
+        // One quick decode, materialised (see DevelopService.quickSource), gives the print timing and the four
+        // stages of the reveal. If it fails, the full develop below reports why.
+        let quick = await Task.detached(priority: .userInitiated) { () -> (CIImage, Double, Double)? in
+            guard let source = try? dev.quickSource(for: rec, store: store) else { return nil }
+            let (linear, baseline) = source
+            let timing = dev.measureTiming(linear: linear, baselineEV: baseline, parameters: params, cameraBiasEV: Double(rec.exposureBias))
+            return (linear, baseline, timing)
+        }.value
+        var timed = rec
+        timed.printTimingEV = quick?.2 ?? 0
+        try? store.save(timed)
+        let timedRecord = timed
+        // The full-resolution develop needs only the timing, so it starts now, while the stages are rendered.
+        let full = Task.detached(priority: .userInitiated) { () throws -> DevelopedImage in
+            try dev.developToDisk(record: timedRecord, store: store, parameters: params, extraEV: timedRecord.totalPrintEV)
+        }
+        if let quick {
+            let (linear, baseline, timing) = quick
+            stageImages = await Task.detached(priority: .userInitiated) { () -> [Stage: CGImage] in
                 let longEdge = Double(max(linear.extent.width, linear.extent.height))
                 var out: [Stage: CGImage] = [:]
                 for s in [Stage.key, .yellow, .cyan, .magenta] {
@@ -168,20 +182,10 @@ struct DevelopView: View {
                                             fullLongEdge: longEdge, dyeMask: s.mask, spatial: false)
                     if let cg = dev.render(img) { out[s] = cg }
                 }
-                return (out, timing)
-            } catch {
-                return ([:], 0)
-            }
-        }.value
-        stageImages = stages
-        var timed = rec
-        timed.printTimingEV = timing
-        try? store.save(timed)
-        let timedRecord = timed
-        // Play the reveal while the full-resolution develop runs
-        let full = Task.detached(priority: .userInitiated) { () throws -> DevelopedImage in
-            try dev.developToDisk(record: timedRecord, store: store, parameters: params, extraEV: timedRecord.totalPrintEV)
+                return out
+            }.value
         }
+        // Play the reveal while the full-resolution develop runs
         for s in [Stage.yellow, .cyan, .magenta] {
             try? await Task.sleep(for: .milliseconds(520))
             stage = s
