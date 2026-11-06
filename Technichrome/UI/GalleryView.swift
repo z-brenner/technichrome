@@ -135,7 +135,8 @@ struct GalleryView: View {
             do {
                 let url = try result.get()
                 // Mapped and copied, not read into memory (PhotoStore.add(importedFileAt:)).
-                developImported(try await model.store.add(importedFileAt: url))
+                let record = try await model.store.add(importedFileAt: url)
+                developImported(record)
             } catch {
                 importError = error.localizedDescription
             }
@@ -143,7 +144,8 @@ struct GalleryView: View {
     }
 
     private func importData(_ data: Data) async throws {
-        developImported(try await model.store.add(importedData: data))
+        let record = try await model.store.add(importedData: data)
+        developImported(record)
     }
 
     private func developImported(_ record: PhotoRecord) {

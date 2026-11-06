@@ -155,9 +155,11 @@ public final class DevelopService: @unchecked Sendable {
         let average = CIFilter.areaAverage()
         average.inputImage = logLum
         average.extent = linear.extent
-        guard let out = average.outputImage else { return 0 }
+        guard let out = average.outputImage, !out.extent.isInfinite else { return 0 }
         var pixel = [Float](repeating: 0, count: 4)
-        context.render(out, toBitmap: &pixel, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        // The 1×1 average sits at the image's origin, which a materialised or oriented image need not have at 0.
+        context.render(out, toBitmap: &pixel, rowBytes: 16, bounds: CGRect(origin: out.extent.origin, size: CGSize(width: 1, height: 1)),
+                       format: .RGBAf, colorSpace: nil)
         let geometricMean = pow(2.0, Double(pixel[0]))
         return PrintTiming.exposureEV(geometricMeanLuminance: geometricMean, target: p.timingTarget, strength: p.timingStrength,
                                       limit: p.timingLimit, cameraBiasEV: cameraBiasEV)
