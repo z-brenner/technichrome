@@ -281,22 +281,10 @@ struct CameraView: View {
     }
 
     private var galleryThumb: some View {
-        Button {
+        let newest = model.store.records.first
+        return GalleryThumbButton(record: newest, url: newest.map { model.store.thumbnailURL(for: $0) }) {
             model.screen = .gallery
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06))
-                if let r = model.store.records.first, let ui = UIImage(contentsOfFile: model.store.thumbnailURL(for: r).path) {
-                    Image(uiImage: ui).resizable().scaledToFill()
-                } else {
-                    Image(systemName: "square.grid.3x3").font(.system(size: 14, weight: .light)).foregroundStyle(Theme.ivoryDim)
-                }
-            }
-            .frame(width: 46, height: 46)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ivoryFaint, lineWidth: 1))
         }
-        .buttonStyle(.plain)
     }
 
     private var exposureReadout: some View {
@@ -341,6 +329,37 @@ struct CameraView: View {
                 captureError = error.localizedDescription
                 Haptics.error()
             }
+        }
+    }
+}
+
+/// The camera's gallery button, a view of its own: the camera view's body runs on every exposure tick and focus
+/// tap, and it used to read and decode the newest thumbnail on the main thread each time. Here the thumbnail is
+/// loaded once per record change, off the main thread (ThumbnailCache).
+private struct GalleryThumbButton: View {
+    let record: PhotoRecord?
+    let url: URL?
+    let action: () -> Void
+    @State private var image: UIImage?
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06))
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "square.grid.3x3").font(.system(size: 14, weight: .light)).foregroundStyle(Theme.ivoryDim)
+                }
+            }
+            .frame(width: 46, height: 46)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ivoryFaint, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .task(id: record) {
+            guard let url else { image = nil; return }
+            image = await ThumbnailCache.shared.image(at: url, maxPixelSize: 160)   // 46 pt at 3×, with margin
         }
     }
 }
