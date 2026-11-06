@@ -39,6 +39,20 @@ final class AppModel {
 
     private static let parametersKey = "technichrome.parameters.v1"
 
+    /// The live preview's renderer, with its Metal command queue and CIContext, made once for the app's
+    /// lifetime. The camera view leaves the hierarchy on every trip to the gallery, and a context is costly to
+    /// make (Apple: "it is not recommended to create many CIContext instances"); a new one per visit also
+    /// meant compiling the kernels again, while the camera's frame handler kept the old one alive.
+    @ObservationIgnored private var renderer: PreviewRenderer?
+
+    func previewRenderer() -> PreviewRenderer? {
+        if let renderer { return renderer }
+        guard let r = PreviewRenderer(engine: engine) else { return nil }
+        renderer = r
+        camera.frameHandler = { buffer in r.submit(pixelBuffer: buffer) }   // set once, before the camera first runs
+        return r
+    }
+
     init() {
         do {
             let e = try TechnichromeEngine(lutDimension: 33)

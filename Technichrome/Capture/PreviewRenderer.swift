@@ -68,6 +68,13 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         return v
     }
 
+    /// Drops the last camera frame, and the pixel buffer it holds, while the camera view is away: the renderer
+    /// lives as long as the app (AppModel.previewRenderer).
+    func releaseFrame() {
+        frameLock.lock(); pendingFrame = nil; frameLock.unlock()
+        latest = nil
+    }
+
     /// Called on the video queue.
     nonisolated func submit(pixelBuffer: CVPixelBuffer) {
         let image = CIImage(cvPixelBuffer: pixelBuffer)

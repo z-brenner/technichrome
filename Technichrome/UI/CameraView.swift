@@ -33,7 +33,10 @@ struct CameraView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .onAppear { setUp() }
-        .onDisappear { model.camera.stop() }
+        .onDisappear {
+            model.camera.stop()
+            renderer?.releaseFrame()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.camera.start() } else if phase == .background { model.camera.stop() }
         }
@@ -305,13 +308,11 @@ struct CameraView: View {
     // MARK: - Actions
 
     private func setUp() {
-        if renderer == nil, let r = PreviewRenderer(engine: model.engine) {
-            renderer = r
-            model.camera.frameHandler = { buffer in r.submit(pixelBuffer: buffer) }
-        }
+        if renderer == nil { renderer = model.previewRenderer() }    // the app-lifetime renderer (see AppModel)
         renderer?.parameters = model.parameters   // may have changed in the Laboratory while this view was away
         renderer?.cameraBiasEV = Double(model.camera.exposureBias)
         renderer?.systemPressure = model.camera.pressure
+        renderer?.showsLook = showsLook           // this view's toggle starts afresh; the renderer outlives it
         model.camera.start()
     }
 
