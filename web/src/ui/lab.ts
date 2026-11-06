@@ -1,12 +1,13 @@
 // The Laboratory: every engine parameter the app exposes, as sliders bound to a parameters object.
 
-import { type EngineParameters, TECHNICHROME_V1 } from '../engine/parameters';
+import { DYE_SETS, type EngineParameters, TECHNICHROME_V1, dyeSetOf, useDyeSet } from '../engine/parameters';
 
 export interface LabState {
   parameters: EngineParameters;
   /** Per-photograph print exposure on top of the parameters, in stops (the app's printExposureEV). */
   printExposureEV: number;
-  /** Era of the silver key: 0.15 (shipped), 1 (1935 full key), 0.5 (light), 0 (post-1944). */
+  /** The print era sets the silver key's strength: 1 (1930s, full key), 0.5 (1930s, light), 0.15 (shipped, faint), 0
+   *  (post-war US, none) — see docs/COLOR_SCIENCE.md for what the period sources say. */
 }
 
 type Getter = (s: LabState) => number;
@@ -57,15 +58,19 @@ const SECTIONS: { title: string; sliders: SliderSpec[]; extra?: (state: LabState
     ],
   },
   {
-    title: 'Silver key image (1932–c.1944)',
+    title: 'Silver key image',
     sliders: [
       { title: 'Key strength', min: 0, max: 1, step: 0.01, format: f2, get: (s) => s.parameters.keyStrength, set: (s, v) => { s.parameters.keyStrength = v; } },
       { title: 'Key gamma', min: 0.2, max: 2, step: 0.01, format: f2, get: (s) => s.parameters.key.gamma, set: (s, v) => { s.parameters.key.gamma = v; } },
       { title: 'Key printing light', min: -2.5, max: 0, step: 0.01, format: f2, get: (s) => s.parameters.key.logE0, set: (s, v) => { s.parameters.key.logE0 = v; } },
     ],
-    extra: (state, rerender) => segmented('Print era', [
-      ['1935 · full key', 1], ['1939–44 · light key', 0.5], ['shipped · 0.15', 0.15], ['post-1944 · none', 0],
-    ], () => state.parameters.keyStrength, (v) => { state.parameters.keyStrength = v; rerender(); }),
+    extra: (state, rerender) => {
+      const both = document.createElement('div');
+      both.append(segmented('Print era', [
+        ['1930s · full key', 1], ['1930s · light key', 0.5], ['shipped · faint key', 0.15], ['post-war US · none', 0],
+      ], () => state.parameters.keyStrength, (v) => { state.parameters.keyStrength = v; rerender(); }), dyeSetChoice(state, rerender));
+      return both;
+    },
   },
   {
     title: 'Print and projection',
@@ -108,6 +113,31 @@ function segmented(title: string, options: [string, number][], get: () => number
     seg.appendChild(b);
   }
   wrap.appendChild(seg);
+  return wrap;
+}
+
+/** The dye set: Technichrome v1's own dyes or one fitted to measured Technicolor dyes, each with the gains that keep
+ *  greys neutral (docs/COLOR_SCIENCE.md). Choosing one replaces the three dyes and the three contrasts; editing any of
+ *  them afterwards makes the dyes custom. */
+function dyeSetChoice(state: LabState, rerender: () => void): HTMLElement {
+  const current = dyeSetOf(state.parameters);
+  const wrap = document.createElement('div');
+  wrap.className = 'row';
+  const head = document.createElement('div'); head.className = 'row-head'; head.textContent = 'Dye set'; wrap.appendChild(head);
+  const seg = document.createElement('div'); seg.className = 'seg';
+  for (const set of DYE_SETS) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = set.label;
+    b.title = set.name;
+    if (current?.name === set.name) b.classList.add('on');
+    b.addEventListener('click', () => { useDyeSet(state.parameters, set); rerender(); });
+    seg.appendChild(b);
+  }
+  wrap.appendChild(seg);
+  const note = document.createElement('div'); note.className = 'row-note';
+  const text = document.createElement('span');
+  text.textContent = current ? current.source : 'Custom: the dyes or their contrasts differ from every set.';
+  note.appendChild(text);
+  wrap.appendChild(note);
   return wrap;
 }
 

@@ -1,9 +1,10 @@
 // Every adjustable quantity of the Technichrome engine, in the same JSON schema the iPhone app and the Python
-// tools use (EngineParameters.swift / export_fixtures.py). technichromeV1.json is the shipped look, exported
-// from the parity fixture; CI checks it still equals the fixture's parameters.
+// tools use (EngineParameters.swift / export_fixtures.py). technichromeV1.json is the shipped look and dyeSets.json the
+// dye sets the Laboratory offers, both exported from the parity fixture; CI checks they still equal the fixture's.
 
 import type { CurveParameters } from './curve';
 import defaults from './technichromeV1.json';
+import dyeSets from './dyeSets.json';
 
 export interface DyeLobe { mu: number; sigmaLeft: number; sigmaRight: number; amplitude: number; shape: number }
 export interface DyeSpectrum { lobes: DyeLobe[] }
@@ -39,6 +40,27 @@ export interface EngineParameters {
 }
 
 export const TECHNICHROME_V1: EngineParameters = defaults as EngineParameters;
+
+/** A dye set: three dyes, the gains that print greys neutral with them and the rest of the shipped look, a short
+ *  label and where the spectra come from (tcengine.DYE_SETS; EngineParameters.dyeSets in the app). */
+export interface DyeSetPreset { name: string; label: string; cyan: DyeSpectrum; magenta: DyeSpectrum; yellow: DyeSpectrum; dyeGain: number[]; source: string }
+
+/** Technichrome v1's own dyes, then the sets fitted to measured Technicolor dyes (docs/COLOR_SCIENCE.md). */
+export const DYE_SETS: DyeSetPreset[] = dyeSets as DyeSetPreset[];
+
+/** Takes a dye set's dyes and gains into `p`; everything else stays. */
+export function useDyeSet(p: EngineParameters, set: DyeSetPreset) {
+  p.cyan = JSON.parse(JSON.stringify(set.cyan)) as DyeSpectrum;
+  p.magenta = JSON.parse(JSON.stringify(set.magenta)) as DyeSpectrum;
+  p.yellow = JSON.parse(JSON.stringify(set.yellow)) as DyeSpectrum;
+  p.dyeGain = set.dyeGain.slice();
+}
+
+/** The dye set whose dyes and gains `p` carries, if any (none once a dye or a gain is edited). */
+export function dyeSetOf(p: EngineParameters): DyeSetPreset | undefined {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  return DYE_SETS.find((d) => same(d.cyan, p.cyan) && same(d.magenta, p.magenta) && same(d.yellow, p.yellow) && same(d.dyeGain, p.dyeGain));
+}
 
 export function cloneParameters(p: EngineParameters): EngineParameters {
   return JSON.parse(JSON.stringify(p)) as EngineParameters;

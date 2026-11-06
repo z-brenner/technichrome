@@ -1,0 +1,229 @@
+[
+ {
+  "name": "Technichrome v1",
+  "label": "Technichrome v1",
+  "cyan": {
+   "lobes": [
+    {
+     "mu": 652.0,
+     "sigmaLeft": 52.0,
+     "sigmaRight": 62.0,
+     "amplitude": 1.0,
+     "shape": 3.0
+    },
+    {
+     "mu": 540.0,
+     "sigmaLeft": 45.0,
+     "sigmaRight": 40.0,
+     "amplitude": 0.22,
+     "shape": 2.0
+    },
+    {
+     "mu": 440.0,
+     "sigmaLeft": 35.0,
+     "sigmaRight": 35.0,
+     "amplitude": 0.12,
+     "shape": 2.0
+    }
+   ]
+  },
+  "magenta": {
+   "lobes": [
+    {
+     "mu": 545.0,
+     "sigmaLeft": 42.0,
+     "sigmaRight": 42.0,
+     "amplitude": 1.0,
+     "shape": 3.5
+    },
+    {
+     "mu": 440.0,
+     "sigmaLeft": 40.0,
+     "sigmaRight": 35.0,
+     "amplitude": 0.22,
+     "shape": 2.0
+    },
+    {
+     "mu": 640.0,
+     "sigmaLeft": 25.0,
+     "sigmaRight": 40.0,
+     "amplitude": 0.04,
+     "shape": 2.0
+    }
+   ]
+  },
+  "yellow": {
+   "lobes": [
+    {
+     "mu": 445.0,
+     "sigmaLeft": 45.0,
+     "sigmaRight": 40.0,
+     "amplitude": 1.0,
+     "shape": 3.5
+    },
+    {
+     "mu": 505.0,
+     "sigmaLeft": 15.0,
+     "sigmaRight": 30.0,
+     "amplitude": 0.08,
+     "shape": 2.0
+    }
+   ]
+  },
+  "dyeGain": [
+   1.2022,
+   0.9087,
+   0.8892
+  ],
+  "source": "The engine's own block dyes (Round 1): an approximation, not a measurement."
+ },
+ {
+  "name": "US 1949 (Samson and Delilah)",
+  "label": "US 1949",
+  "cyan": {
+   "lobes": [
+    {
+     "mu": 649.0,
+     "sigmaLeft": 40.0,
+     "sigmaRight": 106.0,
+     "amplitude": 1.0,
+     "shape": 2.15
+    },
+    {
+     "mu": 559.0,
+     "sigmaLeft": 16.0,
+     "sigmaRight": 72.0,
+     "amplitude": 0.08,
+     "shape": 2.0
+    },
+    {
+     "mu": 391.0,
+     "sigmaLeft": 58.0,
+     "sigmaRight": 59.0,
+     "amplitude": 0.17,
+     "shape": 2.0
+    }
+   ]
+  },
+  "magenta": {
+   "lobes": [
+    {
+     "mu": 544.0,
+     "sigmaLeft": 45.0,
+     "sigmaRight": 51.0,
+     "amplitude": 1.0,
+     "shape": 2.76
+    },
+    {
+     "mu": 405.0,
+     "sigmaLeft": 120.0,
+     "sigmaRight": 12.0,
+     "amplitude": 0.12,
+     "shape": 2.0
+    }
+   ]
+  },
+  "yellow": {
+   "lobes": [
+    {
+     "mu": 457.0,
+     "sigmaLeft": 62.0,
+     "sigmaRight": 37.0,
+     "amplitude": 1.0,
+     "shape": 2.34
+    }
+   ]
+  },
+  "dyeGain": [
+   1.0862,
+   0.9606,
+   0.9532
+  ],
+  "source": "Fitted to the absorbances FilmColors extracted from a multispectral scan of a 1949 Samson and Delilah trailer (relative units, zero unknown)."
+ },
+ {
+  "name": "UK (NSMM 12593)",
+  "label": "UK",
+  "cyan": {
+   "lobes": [
+    {
+     "mu": 642.0,
+     "sigmaLeft": 54.0,
+     "sigmaRight": 37.0,
+     "amplitude": 1.0,
+     "shape": 1.99
+    },
+    {
+     "mu": 502.0,
+     "sigmaLeft": 35.0,
+     "sigmaRight": 23.0,
+     "amplitude": 0.04,
+     "shape": 2.0
+    },
+    {
+     "mu": 408.0,
+     "sigmaLeft": 120.0,
+     "sigmaRight": 38.0,
+     "amplitude": 0.18,
+     "shape": 2.0
+    }
+   ]
+  },
+  "magenta": {
+   "lobes": [
+    {
+     "mu": 542.0,
+     "sigmaLeft": 47.0,
+     "sigmaRight": 47.0,
+     "amplitude": 1.0,
+     "shape": 2.39
+    },
+    {
+     "mu": 380.0,
+     "sigmaLeft": 98.0,
+     "sigmaRight": 89.0,
+     "amplitude": 0.35,
+     "shape": 2.0
+    },
+    {
+     "mu": 650.0,
+     "sigmaLeft": 24.0,
+     "sigmaRight": 29.0,
+     "amplitude": 0.11,
+     "shape": 2.0
+    }
+   ]
+  },
+  "yellow": {
+   "lobes": [
+    {
+     "mu": 390.0,
+     "sigmaLeft": 91.0,
+     "sigmaRight": 91.0,
+     "amplitude": 1.0,
+     "shape": 3.42
+    },
+    {
+     "mu": 550.0,
+     "sigmaLeft": 18.0,
+     "sigmaRight": 29.0,
+     "amplitude": 0.07,
+     "shape": 2.0
+    },
+    {
+     "mu": 657.0,
+     "sigmaLeft": 24.0,
+     "sigmaRight": 47.0,
+     "amplitude": 0.05,
+     "shape": 2.0
+    }
+   ]
+  },
+  "dyeGain": [
+   1.1225,
+   0.9391,
+   0.9384
+  ],
+  "source": "Fitted to FilmColors' multispectral measurement of pure-dye areas of a British leader, National Science and Media Museum NSMM 12593 (absolute absorbance, date unknown)."
+ }
+]

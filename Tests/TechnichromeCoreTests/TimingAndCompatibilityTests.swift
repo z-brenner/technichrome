@@ -61,6 +61,9 @@ final class TimingAndCompatibilityTests: XCTestCase {
         var c = EngineParameters.default
         c.cyan.lobes[0].mu += 5
         XCTAssertNotEqual(PrintModelKey(c), PrintModelKey(EngineParameters.default))
+        var g = EngineParameters.default
+        g.dyeGain[0] += 0.01
+        XCTAssertNotEqual(PrintModelKey(g), PrintModelKey(EngineParameters.default), "the cube's axes span gain · D max")
     }
 
     func testLUTIsMonotonicAlongTheNeutralDiagonal() {

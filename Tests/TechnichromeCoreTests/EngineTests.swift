@@ -50,6 +50,21 @@ final class EngineTests: XCTestCase {
         XCTAssertLessThan(black.y, 0.01)
     }
 
+    /// The deepest blacks keep the hue of the shadows above them: each axis of the cube spans gain · D max, so cyan
+    /// (gain above 1) no longer reaches the cube's edge before magenta and yellow and turns the blacks red
+    /// (C*ab was 1.4 at 2^-14 when the cube stopped at D max).
+    func testDeepestBlacksStayNeutral() {
+        let pipe = ReferencePipeline(parameters: .default, lutDimension: 17)
+        let white = ColorSpaces.p3ToXYZ * SIMD3(repeating: 1)
+        func f(_ t: Double) -> Double { t > 216.0 / 24389.0 ? cbrt(t) : (24389.0 / 27.0 * t + 16) / 116 }
+        for stop in stride(from: -7.0, through: -14.0, by: -1.0) {
+            let xyz = ColorSpaces.p3ToXYZ * pipe.develop(sceneLinear: SIMD3(repeating: pow(2.0, stop)))
+            let fx = f(xyz.x / white.x), fy = f(xyz.y / white.y), fz = f(xyz.z / white.z)
+            let chroma = hypot(500 * (fx - fy), 200 * (fy - fz))
+            XCTAssertLessThan(chroma, 1.0, "black not neutral at stop \(stop)")
+        }
+    }
+
     func testParametersRoundTripThroughJSON() throws {
         let p = EngineParameters.default
         let data = try p.jsonData()

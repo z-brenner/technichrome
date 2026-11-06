@@ -250,14 +250,21 @@ struct LaboratoryView: View {
     private func lightRow(_ t: String, _ b: Binding<Double>) -> some View { slider(t, b, -1.5...1.5, step: 0.01, format: "%+.2f EV") }
 
     private var keySection: some View {
-        Section("Silver key image (1932–c.1944)") {
+        Section("Silver key image") {
             Picker("Print era", selection: keyEra) {
-                Text("1935 · full key").tag(KeyEra.full)
-                Text("1939–44 · light key").tag(KeyEra.light)
-                Text("post-1944 · no key").tag(KeyEra.none)
+                Text("1930s · full key").tag(KeyEra.full)
+                Text("shipped · faint key").tag(KeyEra.light)
+                Text("post-war US · no key").tag(KeyEra.none)
                 Text("custom").tag(KeyEra.custom)
             }
             .pickerStyle(.menu)
+            Picker("Dye set", selection: dyeSetName) {
+                ForEach(EngineParameters.dyeSets) { set in Text(set.label).tag(Optional(set.name)) }
+                Text("custom").tag(String?.none)
+            }
+            .pickerStyle(.menu)
+            Text(params.dyeSet?.source ?? "Custom: the dyes or their gains differ from every set.")
+                .font(.footnote).foregroundStyle(Theme.ivoryDim)
             slider("Key strength", $params.keyStrength, 0...1, step: 0.01, format: "%.2f")
             slider("Key gamma", $params.key.gamma, 0.2...2, step: 0.01, format: "%.2f")
             slider("Key printing light", $params.key.logE0, -2.5...0, step: 0.01, format: "%.2f")
@@ -324,9 +331,19 @@ struct LaboratoryView: View {
         }
     }
 
+    /// The dye set in use, by name (nil: custom dyes). Choosing one takes its three dyes and the gains that keep greys
+    /// neutral with them (docs/COLOR_SCIENCE.md); editing a dye or a gain afterwards makes the dyes custom.
+    private var dyeSetName: Binding<String?> {
+        Binding(get: { params.dyeSet?.name }, set: { name in
+            if let set = EngineParameters.dyeSets.first(where: { $0.name == name }) { params.useDyeSet(set) }
+        })
+    }
+
     enum KeyEra: Hashable { case full, light, none, custom }
 
-    /// The documented "50 %" key of the first prints, the lighter key the engine ships with, or none.
+    /// The print era by its silver key: the model's full key (1930s prints carried one; period sources call it
+    /// "thin"), the faint key the engine ships with (some late-1940s London prints), or none (post-war US prints).
+    /// See docs/COLOR_SCIENCE.md; the strengths are unchanged.
     private var keyEra: Binding<KeyEra> {
         Binding(get: {
             switch params.keyStrength {

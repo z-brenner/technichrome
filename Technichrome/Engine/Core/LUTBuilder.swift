@@ -3,7 +3,9 @@
 //  Technichrome
 //
 //  Bakes the spectral print model into a 3D lookup table indexed by normalised dye densities
-//  (cyan → R axis, magenta → G axis, yellow → B axis) and returning gamut-clipped display-linear RGB.
+//  (cyan → R axis, magenta → G axis, yellow → B axis) and returning gamut-clipped display-linear Display P3.
+//  Each axis spans [0, gain · D max] of its dye, the most of it the print carries, so the three dyes reach
+//  the cube's edge together (ReferencePipeline.densities normalises the same way).
 //  Layout matches CIColorCube: RGBA Float32, red (cyan) varying fastest, then green, then blue.
 //
 
@@ -50,19 +52,20 @@ public enum LUTBuilder {
     ///
     /// The print's transmittance factorises per dye, 10^−(d_c·a_c(λ) + d_m·a_m(λ) + d_y·a_y(λ) + Dmin) =
     /// T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so three tables of `dimension` × wavelengths transmittances are computed
-    /// once and every entry is a sum of products: 3·dimension·71 `pow` calls instead of 71·dimension³. The
+    /// once and every entry is a sum of products: 3·dimension·95 `pow` calls instead of 95·dimension³. The
     /// result equals `PrintModel.displayLinear` + `softClipGamut` evaluated at every node (the core tests check
-    /// it to 1e-6). Measured in a release build on a shared x86 Linux machine, not on a phone: 33³ in about 3 ms
-    /// and 65³ in about 23 ms, where evaluating every node directly took about 29 ms and 250 ms.
-    public static func build(parameters p: EngineParameters, dimension: Int = 33, displaySpace: PrintModel.DisplaySpace = .displayP3) -> DyeLUT {
-        let model = PrintModel(parameters: p, displaySpace: displaySpace)
+    /// it to 1e-6). Measured in a release build on a shared x86 Linux machine, not on a phone: 33³ in about 4 ms
+    /// and 65³ in about 36 ms (95 wavelengths), where evaluating every node directly took about 29 ms and 250 ms
+    /// on the 71-wavelength grid used before Round 25.
+    public static func build(parameters p: EngineParameters, dimension: Int = 33) -> DyeLUT {
+        let model = PrintModel(parameters: p)
         let samples = Spectral.sampleCount
         let n = Double(dimension - 1)
-        /// 10^−(j/n · Dmax · a(λᵢ)) for dye `k`, node j major.
+        /// 10^−(j/n · Dmax · gain · a(λᵢ)) for dye `k`, node j major.
         func transmittances(_ k: Int) -> [Double] {
             var t = [Double](repeating: 0, count: dimension * samples)
             for j in 0..<dimension {
-                let d = Double(j) / n * p.dyeDMax[k]
+                let d = Double(j) / n * p.dyeDMax[k] * p.dyeGain[k]
                 for i in 0..<samples { t[j * samples + i] = pow(10.0, -d * model.absorbances[k][i]) }
             }
             return t

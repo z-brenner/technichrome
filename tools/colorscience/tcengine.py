@@ -10,11 +10,14 @@ Pipeline (per pixel, scene-linear sRGB-primaries RGB in, display-linear RGB out)
   5. key image           Dk = key_curve(log10(10^-Dn_green)) * key        (silver positive from the green record)
   6. spectral print      T(λ) = 10^-(Σ Dd_i a_i(λ) + Dk + Dmin)           (transmittance of the dye-transfer print)
   7. projection          XYZ = ∫ P(λ) T(λ) cmf(λ) dλ, adapted to D65      (carbon-arc projector, eye adapted to screen white)
-  8. display             P3/sRGB linear, surround compensation, soft gamut clip
+  8. display             P3 linear, surround compensation, soft gamut clip; an sRGB print is that P3 print
+                         converted to sRGB and soft-clipped again with Rec. 709 weights (srgb_print)
 
 Steps 1–5 are cheap analytic per-pixel maths (they live in the Metal kernels on device);
-steps 6–7 are baked into a 3D LUT indexed by the three normalised dye densities; the key
-image is a neutral density so it factors out as a plain multiplier applied after the LUT.
+steps 6–7 are baked into a 3D LUT indexed by the three normalised dye densities (each dye's
+density over the most of it the print can carry, gain · D max, so every axis of the cube spans
+[0, gain · D max]); the key image is a neutral density so it factors out as a plain multiplier
+applied after the LUT.
 
 Every number in `DEFAULT_PARAMS` is either (a) a documented property of the process, or (b) an
 artistic approximation. The docs/COLOR_SCIENCE.md file states which is which. Nothing here is
@@ -206,13 +209,13 @@ class EngineParams:
     # greys print neutral through the whole scale, plus printer lights (stops) that shift each matrix curve.
     # Lights alone cannot neutralise every grey level: balanced by lights only, this model shows the classic
     # crossover (cyan highlights, red shadows) that period sources describe as blacks with unwanted hues.
-    dye_gain: tuple = (1.1963, 0.9153, 0.8884)
+    dye_gain: tuple = (1.2022, 0.9087, 0.8892)
     dye_light_ev: tuple = (0.0, 0.0, 0.0)
     mat_gamma: float = 3.2176
     mat_log_e0: float = -1.0621# log10 printing exposure at half density
     mat_nu: float = 0.0253
-    # silver key image printed from the green record (used c. 1932–1944)
-    key_strength: float = 0.15                 # 0 = none (post-1944 print), 1 = full documented '50 %' image
+    # silver key image, printed here from the green record (its record, strength and era: docs/COLOR_SCIENCE.md)
+    key_strength: float = 0.15                 # 0 = none, 1 = the model's full key (period sources call it 'thin')
     key_dmax: float = 1.10
     key_gamma: float = 0.9
     key_log_e0: float = -1.05
@@ -223,15 +226,15 @@ class EngineParams:
     # viewing
     projector_cct: float = 5400.0              # carbon arc ~ daylight-ish; adapted away, only 2nd-order effects remain
     surround_exponent: float = 0.92            # dark-surround print viewed on a bright-surround phone
-    # Screen flare: stray light added to the projected image as a fraction of screen white. Ball (1935)
-    # gives the projected contrast 'from whitest white to blackest black' as about 1 to 64, i.e. 1/64.
-    # Off by default: a phone is not a 1935 projection (see docs/COLOR_SCIENCE.md).
+    # Screen flare: stray light added to the projected image as a fixed fraction of screen white. Ball's (1935)
+    # 'about 1 to 64' is a general remark; measured lens flare was about 0.06 x the frame's mean transmission
+    # (Jones & Tuttle 1926). Off by default: a phone is not a projection (see docs/COLOR_SCIENCE.md).
     screen_flare: float = 0.0
     # print timing: nudge the printer light so the scene's geometric-mean luminance approaches the target
     timing_strength: float = 0.6
     timing_target: float = 0.16
     timing_limit: float = 1.25
-    display: str = 'p3'                        # 'p3' or 'srgb'
+    display: str = 'p3'                        # 'p3', or 'srgb': the P3 print converted by srgb_print
     # spatial (not part of the per-pixel maths; documented here so the preset is complete)
     diffusion_sigma_px_at_4k: float = 1.1      # dye bleed in the gelatin, σ in px for a 4000 px long edge
     bloom_amount: float = 0.0                  # optional negative halation / highlight glow
@@ -241,6 +244,52 @@ class EngineParams:
     def to_json(self):
         d = asdict(self)
         return json.dumps(d, indent=2)
+
+
+# ----------------------------------------------------------------------------
+# 4b. Dye sets: the engine's own lobes and two fitted to measured Technicolor dyes
+# ----------------------------------------------------------------------------
+@dataclass
+class DyeSetPreset:
+    """A dye set the Laboratory offers: three dyes, the contrast multipliers (dye gains) that print greys neutral with
+    them and the shipped look's other parameters (calibrate_neutral; set_params.py --calibrate re-balances them), a
+    short label and where the spectra come from. docs/COLOR_SCIENCE.md gives each set's sources and uncertainty."""
+    name: str
+    label: str
+    dyes: DyeSet
+    gains: tuple
+    source: str
+
+
+# The lobes of the measured sets are least-squares fits by fit_dyes.py to spectra digitised from FilmColors' figures
+# (data/technicolor_dyes_digitised.csv; estimates, about ±0.02 absorbance). There was no single Technicolor dye set:
+# the dyes were blends, changed over the years and differed between London and Hollywood.
+DYE_SETS = {
+    'Technichrome v1': DyeSetPreset(
+        name='Technichrome v1', label='Technichrome v1', dyes=DEFAULT_DYES,
+        gains=EngineParams.dye_gain,
+        source='The engine\'s own block dyes (Round 1): an approximation, not a measurement.'),
+    'US 1949 (Samson and Delilah)': DyeSetPreset(
+        name='US 1949 (Samson and Delilah)', label='US 1949',
+        dyes=DyeSet(
+            cyan=Dye([(649.0, 40.0, 106.0, 1.00, 2.15), (559.0, 16.0, 72.0, 0.08, 2.0), (391.0, 58.0, 59.0, 0.17, 2.0)]),
+            magenta=Dye([(544.0, 45.0, 51.0, 1.00, 2.76), (405.0, 120.0, 12.0, 0.12, 2.0)]),
+            yellow=Dye([(457.0, 62.0, 37.0, 1.00, 2.34)]),
+        ),
+        gains=(1.0862, 0.9606, 0.9532),
+        source='Fitted to the absorbances FilmColors extracted from a multispectral scan of a 1949 Samson and Delilah '
+               'trailer (relative units, zero unknown).'),
+    'UK (NSMM 12593)': DyeSetPreset(
+        name='UK (NSMM 12593)', label='UK',
+        dyes=DyeSet(
+            cyan=Dye([(642.0, 54.0, 37.0, 1.00, 1.99), (502.0, 35.0, 23.0, 0.04, 2.0), (408.0, 120.0, 38.0, 0.18, 2.0)]),
+            magenta=Dye([(542.0, 47.0, 47.0, 1.00, 2.39), (380.0, 98.0, 89.0, 0.35, 2.0), (650.0, 24.0, 29.0, 0.11, 2.0)]),
+            yellow=Dye([(390.0, 91.0, 91.0, 1.00, 3.42), (550.0, 18.0, 29.0, 0.07, 2.0), (657.0, 24.0, 47.0, 0.05, 2.0)]),
+        ),
+        gains=(1.1225, 0.9391, 0.9384),
+        source='Fitted to FilmColors\' multispectral measurement of pure-dye areas of a British leader, '
+               'National Science and Media Museum NSMM 12593 (absolute absorbance, date unknown).'),
+}
 
 
 # ----------------------------------------------------------------------------
@@ -268,7 +317,9 @@ class Engine:
         self.white_scale = 1.0 / white_xyz[1]
         src_white = white_xyz * self.white_scale
         self.cat = S.bradford_cat(src_white, S.xy_to_xyz(S.D65_xy))
-        self.xyz_to_display = (S.XYZ_TO_P3 if p.display == 'p3' else S.XYZ_TO_SRGB) @ self.cat
+        # The print, and so the cube, is always Display P3: an sRGB print is the finished P3 print converted
+        # (srgb_print), never a cube baked in sRGB, so the key, flare and surround act on the same channels either way.
+        self.xyz_to_display = S.XYZ_TO_P3 @ self.cat
 
     def print_xyz(self, dye_density):
         """dye_density: (..., 3) absolute peak densities of cyan, magenta, yellow → XYZ relative to print white (Y_white = 1)."""
@@ -283,11 +334,19 @@ class Engine:
         return rgb
 
     # --- LUT ---------------------------------------------------------------------------------
+    def dye_ceiling(self):
+        """The most of each dye the print carries, gain · D max (absolute peak density): a normalised density of 1.
+        Normalising by D max alone let a gain above 1 (cyan's) reach the cube's edge before the other dyes, so the
+        deepest blacks lost cyan and turned red; with the gain in the ceiling every dye reaches its edge together."""
+        return np.array(self.p.dye_dmax, dtype=np.float64) * np.array(self.p.dye_gain, dtype=np.float64)
+
     def lut_node_densities(self, n):
-        """Absolute dye densities at the nodes of an n³ cube, (n, n, n, 3) indexed [c, m, y]."""
+        """Absolute dye densities at the nodes of an n³ cube, (n, n, n, 3) indexed [c, m, y]: node j of axis i is
+        j/(n−1) · D max_i · gain_i."""
         g = np.linspace(0.0, 1.0, n)
         c, m, y = np.meshgrid(g, g, g, indexing='ij')
-        return np.stack([c * self.p.dye_dmax[0], m * self.p.dye_dmax[1], y * self.p.dye_dmax[2]], axis=-1)
+        p = self.p
+        return np.stack([c * p.dye_dmax[0] * p.dye_gain[0], m * p.dye_dmax[1] * p.dye_gain[1], y * p.dye_dmax[2] * p.dye_gain[2]], axis=-1)
 
     def build_lut(self, n):
         """The cube, factorised per dye: 10^-(Σ d_i a_i(λ) + Dmin) = T_c(λ) T_m(λ) T_y(λ) 10^-Dmin, so three
@@ -295,7 +354,7 @@ class Engine:
         printModel.ts bake the same way). Equal at every node to soft_clip_gamut(display_linear_from_densities(d)),
         which check_prototype.py asserts."""
         g = np.linspace(0.0, 1.0, n)
-        T = [10.0 ** (-np.outer(g * self.p.dye_dmax[i], self.A[i])) for i in range(3)]   # (n, wavelengths) per dye
+        T = [10.0 ** (-np.outer(g * self.p.dye_dmax[i] * self.p.dye_gain[i], self.A[i])) for i in range(3)]   # (n, wavelengths) per dye
         w = (self.P * 10.0 ** (-self.p.print_dmin))[:, None] * S.CMF * self.white_scale   # lamp · base · observer
         xyz = np.einsum('cl,ml,yl,lk->cmyk', T[0], T[1], T[2], w, optimize=True)
         return soft_clip_gamut(S.apply_matrix(self.xyz_to_display, xyz))  # (n, n, n, 3), indexed [c, m, y]
@@ -330,6 +389,7 @@ class Engine:
             gains = gains * (1.0 + 0.6 * e)
             gains = gains / gains.mean()
         self.p.dye_gain = tuple(float(x) for x in gains)
+        self.lut = self.build_lut(self.lut_size)   # the cube spans gain · D max, so it follows the new gains
         return self.p.dye_gain
 
     def calibrate_neutral_lights(self, greys=(0.6, 0.18, 0.05), iterations=16):
@@ -353,7 +413,11 @@ class Engine:
 
         The separation matrix applies to the scene as it is: a negative component only means the colour lies
         outside sRGB (a wide-gamut RAW colour), not that it is impossible. The record exposures, which cannot be
-        negative, are floored before the log; clamping each scene channel first would clip the colour to sRGB."""
+        negative, are floored before the log; clamping each scene channel first would clip the colour to sRGB.
+
+        Each dye's density, matrix curve × gain, is normalised by gain · D max (`dye_ceiling`), the most of that dye
+        the print carries; the gain cancels, so the normalised density is the matrix curve over its own D max, and
+        the gain lives in the cube, whose axes span [0, gain · D max]."""
         p = self.p
         E = np.asarray(rgb_linear, dtype=np.float64) * (2.0 ** p.exposure_ev)
         Ssep = S.apply_matrix(self.M_sep, E)
@@ -361,24 +425,30 @@ class Engine:
         Dn = self.neg.density(log_s)
         log_print = -Dn                                  # printing exposure through the negative
         light = np.array(p.dye_light_ev) * np.log10(2.0)
-        dd = np.stack([self.mats[i].density(log_print[..., i] + light[i]) * p.dye_gain[i] for i in range(3)], axis=-1)
-        norm = dd / np.array(p.dye_dmax)
+        mat = np.stack([self.mats[i].density(log_print[..., i] + light[i]) for i in range(3)], axis=-1)
+        norm = mat / np.array(p.dye_dmax)
         key = self.key.density(log_print[..., 1]) * p.key_strength
         return np.clip(norm, 0.0, 1.0), key
 
     def develop(self, rgb_linear, use_lut=True):
         """Full per-pixel develop (no spatial stages). Returns display-linear RGB in the chosen display space, [0,1]."""
         norm, key = self.densities(rgb_linear)
+        return self.print_densities(norm, key, use_lut)
+
+    def print_densities(self, norm, key, use_lut=True):
+        """Normalised dye densities and key density → the print: the cube (or, without it, the print model evaluated
+        directly), the key, the screen flare and the viewing exponent, in Display P3; with display='srgb' that print is
+        then converted by srgb_print. develop() is densities() and this; develop_dng.develop_image blurs in between."""
         if use_lut:
             rgb = self.lut_lookup(norm)
         else:
-            rgb = soft_clip_gamut(self.display_linear_from_densities(norm * np.array(self.p.dye_dmax)))
+            rgb = soft_clip_gamut(self.display_linear_from_densities(norm * self.dye_ceiling()))
         rgb = rgb * (10.0 ** (-key))[..., None]
         if self.p.screen_flare > 0:
             f = self.p.screen_flare
             rgb = (rgb + f) / (1.0 + f)             # projection flare: white stays white, black lifts to f/(1+f)
         rgb = np.power(np.clip(rgb, 0.0, 1.0), self.p.surround_exponent)
-        return rgb
+        return srgb_print(rgb) if self.p.display == 'srgb' else rgb
 
 
 def timing_exposure_ev(geometric_mean, target, strength, limit, camera_bias_ev=0.0):
@@ -398,10 +468,17 @@ def geometric_mean_luminance(rgb_linear):
     return float(2.0 ** np.mean(np.log2(np.maximum(y, 1e-6))))
 
 
-def soft_clip_gamut(rgb):
+# Luminance weights of the soft clip, rounded as every implementation writes them: the Y row of Display P3 → XYZ, and
+# of sRGB (Rec. 709 primaries) → XYZ, both D65.
+P3_LUMA = (0.2290, 0.6917, 0.0793)
+REC709_LUMA = (0.2126, 0.7152, 0.0722)
+
+
+def soft_clip_gamut(rgb, luma=P3_LUMA):
     """Bring out-of-gamut colours inside [0,1]: negative components are lifted by desaturating toward
-    the pixel's luminance (chroma scaling), then values > 1 are compressed with a soft knee."""
-    Y = rgb @ np.array([0.2290, 0.6917, 0.0793])  # P3 luminance weights (close enough for sRGB too)
+    the pixel's luminance (chroma scaling), then values > 1 are compressed with a soft knee. `luma` are the
+    luminance weights of the space `rgb` is in (P3 for the cube, Rec. 709 for the sRGB print)."""
+    Y = rgb @ np.array(luma)
     Y = Y[..., None]
     mn = rgb.min(axis=-1, keepdims=True)
     # chroma scale factor so that min component reaches 0 (only where negative)
@@ -412,6 +489,14 @@ def soft_clip_gamut(rgb):
     over = rgb > k
     rgb = np.where(over, k + (1 - k) * np.tanh((rgb - k) / (1 - k)), rgb)
     return np.clip(rgb, 0.0, 1.0)
+
+
+def srgb_print(p3):
+    """The sRGB print, one definition for every place that shows one (the web's sRGB canvas, the documentation
+    figures, display='srgb', PrintModel's sRGB space in the app and the web): the finished display-linear Display P3
+    print (after key, flare and the viewing exponent) converted to linear sRGB, then brought into sRGB with the same
+    soft clip, weighted by Rec. 709 luminance."""
+    return soft_clip_gamut(S.apply_matrix(S.P3_TO_SRGB, np.asarray(p3, dtype=np.float64)), REC709_LUMA)
 
 
 if __name__ == '__main__':

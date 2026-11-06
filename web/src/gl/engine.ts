@@ -82,7 +82,7 @@ export function glowKernel(p: EngineParameters, longEdge: number): { sigmaPx: nu
 interface Program { program: WebGLProgram; uniforms: Record<string, WebGLUniformLocation | null> }
 
 function cubeKey(p: EngineParameters): string {
-  return JSON.stringify([p.cyan, p.magenta, p.yellow, p.dyeDMax, p.printDMin, p.projectorCCT]);
+  return JSON.stringify([p.cyan, p.magenta, p.yellow, p.dyeDMax, p.dyeGain, p.printDMin, p.projectorCCT]);   // the cube spans gain · D max
 }
 
 export class GLEngine {
@@ -122,7 +122,7 @@ export class GLEngine {
       }
     } catch { p3 = false; }
     this.supportsP3Canvas = p3;
-    this.separate = this.compile(SEPARATE_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uSepR', 'uSepG', 'uSepB', 'uNeg', 'uNegShape', 'uMatA', 'uMat', 'uDyeDMax', 'uDyeGain', 'uDyeLight', 'uDyeMask', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
+    this.separate = this.compile(SEPARATE_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uSepR', 'uSepG', 'uSepB', 'uNeg', 'uNegShape', 'uMatA', 'uMat', 'uDyeDMax', 'uDyeLight', 'uDyeMask', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
     this.blur = this.compile(BLUR_FRAG, ['uImage', 'uAxis', 'uWeights', 'uRadius']);
     this.print = this.compile(PRINT_FRAG, ['uDensities', 'uSource', 'uCube', 'uCubeDim', 'uEncoded', 'uExposureScale', 'uSepG', 'uNeg', 'uNegShape', 'uKey', 'uKeyNu', 'uSurround', 'uFlare', 'uOutput', 'uP3ToSRGB', 'uUVOrigin', 'uUVScale', 'uWindowOrigin', 'uShift', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
     this.plain = this.compile(PLAIN_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uOutput', 'uSRGBToP3', 'uUVOrigin', 'uUVScale']);
@@ -199,7 +199,7 @@ export class GLEngine {
     const key = cubeKey(p);
     if (key === this.cubeFor && this.cubeTexture) return;
     const gl = this.gl;
-    const lut = buildLUT(p, this.lutDimension, 'displayP3');
+    const lut = buildLUT(p, this.lutDimension);
     const tex = this.cubeTexture ?? gl.createTexture();
     if (!tex) throw new Error('could not create the cube texture');
     gl.bindTexture(gl.TEXTURE_3D, tex);
@@ -404,7 +404,6 @@ export class GLEngine {
     gl.uniform3f(u.uMatA, mats[0].a, mats[1].a, mats[2].a);
     gl.uniform3f(u.uMat, mats[0].logE0, mats[0].xHalf, mats[0].nu);
     gl.uniform3fv(u.uDyeDMax, p.dyeDMax);
-    gl.uniform3fv(u.uDyeGain, p.dyeGain);
     gl.uniform3f(u.uDyeLight, p.dyeLightEV[0] * l10, p.dyeLightEV[1] * l10, p.dyeLightEV[2] * l10);
     gl.uniform3fv(u.uDyeMask, opts.dyeMask ?? DYE_ALL);
     // Halation: the glow field, where this source sits in the whole image (GL texels: y from the bottom), the image's size.
