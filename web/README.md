@@ -4,12 +4,15 @@ The iPhone app's rendering engine in a browser tab, so the processing can be tes
 reaches a phone, and shared with anyone who has a DNG. It is the **same engine**, not a re-creation:
 
 * The per-pixel maths (`src/engine/`) is a port of the Swift core, which is itself tested against the
-  Python prototype. `npm test` runs the web port against the same 32-colour fixture
-  (`Tests/TechnichromeCoreTests/Fixtures/parity.json`) and passes at 1.6e-8, the Swift core's figure.
+  Python prototype. `npm test` runs the web port against the same fixture
+  (`Tests/TechnichromeCoreTests/Fixtures/parity.json`: 34 colours, two of them outside sRGB, for the shipped
+  look and for two variants of it, unequal dye D max and printer lights with screen flare and no key) and
+  passes at 1.6e-8, the Swift core's figure. It also checks that the dye cube, baked factorised per dye
+  (`buildLUT`, about 8 ms for 33³), equals the print model evaluated at every node.
 * The GPU pipeline (`src/gl/`) is WebGL2 shaders mirroring the Metal kernels pass for pass: separate →
   dye diffusion → dye cube → silver key → screen flare → viewing exponent. `npm run test:gl` renders the
-  fixture through the built site in headless Chromium and compares (worst error 1.2e-4; the app's
-  simulator test allows 0.02).
+  fixture through the built site in headless Chromium and compares: worst error 1.2e-4 and 0.018 ΔE00,
+  against bounds of 5e-4 and 0.1 ΔE00 per colour (the app's simulator test allows 0.02).
 * The shipped look is `src/engine/technichromeV1.json`, exported from the fixture; the parity test fails
   if it drifts from the prototype's parameters. The Laboratory exports and imports the same JSON the app
   and the Python tools use.

@@ -53,7 +53,7 @@ Film Colors (Flueckiger), Wikipedia's *Technicolor* and *Dye-transfer process* e
 scene-linear RGB (sRGB primaries, from CIRAWFilter at boost 0)
    │  exposure 2^(ev + baseline)                       [1]
    ▼
-three-strip camera   S = M_sep · RGB                  [2]  three separation exposures
+three-strip camera   S = max(M_sep · RGB, 10^−6)      [2]  three separation exposures
    ▼
 negatives            Dn = H&D(log10 S)                [3]  three equal-contrast negatives
    ▼
@@ -71,7 +71,18 @@ Steps 1–5 are analytic per-pixel maths in the Metal kernels. Steps 6–7 are b
 table indexed by the three normalised dye densities (`LUTBuilder`); the key image is spectrally
 neutral so it factors out as a multiplier after the table. `ReferencePipeline.swift` is the scalar
 specification; `tools/colorscience/tcengine.py` is the prototype; the unit tests check that the two
-agree to 1e-7.
+agree to 1e-7 on the densities and 1e-6 on the output (they measure about 1e-15 and 1.6e-8, the
+latter the table's float32 storage), on a fixture that covers the shipped look and two variants of it
+(three different dye D max; printer lights with screen flare and no key).
+
+**The bake.** The print's transmittance factorises per dye, 10^−(Σ dᵢ·aᵢ(λ) + Dmin) =
+T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so the table is baked from three tables of 33 × 71 transmittances,
+computed once, and every entry is a sum of products rather than 71 powers: 33³ takes about 3 ms in a
+release build of the Swift core and 8 ms in the web page's JavaScript on a shared x86 machine, against
+29 ms and 137 ms for evaluating every node directly. The result is the same to rounding (1.4e-17), and
+each implementation tests it against direct evaluation at every node. The app keeps the cubes of the
+last four print models it was asked for, so the live preview and the Laboratory, or two looks compared
+in turn, never re-bake; only a change to the dyes, their D max, the base density or the lamp does.
 
 ### [2] Camera — approximation informed by the documented filters
 
@@ -92,13 +103,27 @@ The crosstalk is what makes a saturated scene colour expose the "wrong" negative
 is exactly Ball's bleaching mechanism; it is also why pastel colours stay gentle while strong
 colours become strong.
 
+The matrix applies to the scene-linear RGB as it arrives, negative components included. In extended
+linear sRGB a colour outside the sRGB gamut has a negative component (the app develops with
+CIRAWFilter's gamut mapping off, so such colours can reach the engine; the web's 16-bit LibRaw decode
+has already clipped them). Such a colour is not impossible, only beyond what sRGB can express, and the
+separation is a linear model of the camera's records, so it applies to the colour as it is. Only a
+record exposure cannot be negative: the three exposures are floored (at 10^−6, before the log). Until
+Round 22 the engine clamped each RGB channel at 0 before the matrix instead, which clipped a wide-gamut
+RAW colour to sRGB channel by channel, shifting its hue and dropping the saturation it held: on the
+real surface colours of Pointer's gamut that lie outside sRGB the two orders differ by 4.5 ΔE00 on
+average and up to 18 at a normal exposure. The halation glow, the print-timing measurement and the
+plain comparison view still clamp at 0.
+
 ### [3]–[5] Characteristic curves — approximation
 
 Density versus log exposure is modelled with a Richards (generalised logistic) curve
 `g(x) = (1 + ν·e^−x)^(−1/ν)`. ν = 1 is a logistic; ν → 0 gives an abrupt toe and a long shoulder,
 which is how print materials behave (short toe above diffuse white, steep straight line, long
 roll-off into D-max). The negatives share one curve ("equal contrast"): γ 0.45, D-min 0.12, D-max 2.2,
-ν 0.2. The matrix/dye curve has γ 3.22 and ν 0.025, with D-max 2.8 per dye. The overall tone scale
+ν 0.2. The matrix/dye curve has γ 3.22 and ν 0.025, with D-max 2.8 per dye. Each dye's curve keeps the
+slope γ at half density whatever its D-max, so dyes given different D-max in the Laboratory differ in
+steepness as well as in height; the kernels take the steepness per dye. The overall tone scale
 was fitted (`fit_tone.py`) to a projection-print target rendered for a phone: diffuse white at
 ~0.81 display-linear, mid grey at ~0.19, a slope of about 1.5 through the shadows, and blacks that
 drop into density — Ball's "low exposures tend to drop into black".
