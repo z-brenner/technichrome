@@ -69,12 +69,14 @@ struct GalleryView: View {
 
             if model.store.records.isEmpty {
                 Spacer()
-                VStack(spacing: 10) {
-                    TCLabel("no photographs yet", size: 12, color: Theme.ivory)
-                    Text("Photographs you take live here, with their original RAW files. A DNG from Photos or Files can be imported and developed too.")
-                        .font(Theme.body(14)).foregroundStyle(Theme.ivoryDim).multilineTextAlignment(.center)
+                if model.store.isLoaded {         // not while the library is still being read at launch
+                    VStack(spacing: 10) {
+                        TCLabel("no photographs yet", size: 12, color: Theme.ivory)
+                        Text("Photographs you take live here, with their original RAW files. A DNG from Photos or Files can be imported and developed too.")
+                            .font(Theme.body(14)).foregroundStyle(Theme.ivoryDim).multilineTextAlignment(.center)
+                    }
+                    .padding(40)
                 }
-                .padding(40)
                 Spacer()
             } else {
                 ScrollView {
@@ -93,7 +95,6 @@ struct GalleryView: View {
             PhotoDetailView(record: r)
                 .environment(model)
         }
-        .onAppear { model.store.reload() }
         .confirmationDialog("Import a photograph", isPresented: $choosingImport, titleVisibility: .visible) {
             Button("From Photos") { showsPhotosPicker = true }
             Button("From Files") { showsFileImporter = true }

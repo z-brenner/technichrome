@@ -86,13 +86,21 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
 @Observable
 public final class PhotoStore {
     public private(set) var records: [PhotoRecord] = []
+    /// Whether the library on disk has been read (see `init`); until then `records` holds only what was added.
+    public private(set) var isLoaded = false
     public nonisolated let root: URL
 
     public init(root: URL? = nil) {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        self.root = root ?? docs.appendingPathComponent("Photos", isDirectory: true)
-        try? FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
-        reload()
+        let root = root ?? docs.appendingPathComponent("Photos", isDirectory: true)
+        self.root = root
+        // The library is read once, off the main thread. It used to be read on the main thread at launch (in
+        // AppModel.init) and again on every gallery appearance, a cost that grew with the number of photographs.
+        // The store is the only writer afterwards, so it stays current without reading again.
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) { PhotoStore.loadRecords(root: root) }.value
+            self?.merge(loaded)
+        }
     }
 
     public nonisolated func folder(for id: UUID) -> URL { root.appendingPathComponent(id.uuidString, isDirectory: true) }
@@ -102,9 +110,11 @@ public final class PhotoStore {
     public nonisolated func thumbnailURL(for r: PhotoRecord) -> URL { folder(for: r.id).appendingPathComponent("thumb.jpg") }
     private nonisolated func recordURL(for id: UUID) -> URL { folder(for: id).appendingPathComponent("record.json") }
 
-    public func reload() {
+    /// Every record under `root`, newest first. Runs off the main thread.
+    nonisolated static func loadRecords(root: URL) -> [PhotoRecord] {
         let fm = FileManager.default
-        guard let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { records = []; return }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        guard let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return [] }
         var found: [PhotoRecord] = []
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
@@ -114,7 +124,14 @@ public final class PhotoStore {
                 found.append(r)
             }
         }
-        records = found.sorted { $0.capturedAt > $1.capturedAt }
+        return found.sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    /// Adds the records read from disk after those added since launch, which are the newest and stay first.
+    private func merge(_ loaded: [PhotoRecord]) {
+        let known = Set(records.map(\.id))
+        records += loaded.filter { !known.contains($0.id) }
+        isLoaded = true
     }
 
     /// Persists a capture: writes the original (DNG or HEIF) and the optional Apple companion off the
