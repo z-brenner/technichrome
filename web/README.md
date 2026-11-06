@@ -6,16 +6,19 @@ reaches a phone, and shared with anyone who has a DNG. It is the **same engine**
 * The per-pixel maths (`src/engine/`) is a port of the Swift core, which is itself tested against the
   Python prototype. `npm test` runs the web port against the same fixture
   (`Tests/TechnichromeCoreTests/Fixtures/parity.json`: 34 colours, two of them outside sRGB, for the shipped
-  look and for two variants of it, unequal dye D max and printer lights with screen flare and no key) and
-  passes at 1.6e-8, the Swift core's figure. It also checks that the dye cube, baked factorised per dye
-  (`buildLUT`, about 8 ms for 33³), equals the print model evaluated at every node.
+  look and for four variants of it: unequal dye D max, printer lights with screen flare and no key, and each
+  measured dye set), as the P3 print and as the sRGB print, and passes at 2.3e-8, the Swift core's figure.
+  The observer in the spectral integration is the CIE 1931 2° table (CIE 018:2019, every 5 nm from 360 to
+  830 nm). The tests also check that the dye cube, baked factorised per dye (`buildLUT`, about 9 ms for 33³
+  over the 95 wavelengths), equals the print model evaluated at every node.
 * The GPU pipeline (`src/gl/`) is WebGL2 shaders mirroring the Metal kernels pass for pass: separate →
   dye diffusion → dye cube → silver key → screen flare → viewing exponent. `npm run test:gl` renders the
-  fixture through the built site in headless Chromium and compares: worst error 1.2e-4 and 0.018 ΔE00,
-  against bounds of 5e-4 and 0.1 ΔE00 per colour (the app's simulator test allows 0.02).
-* The shipped look is `src/engine/technichromeV1.json`, exported from the fixture; the parity test fails
-  if it drifts from the prototype's parameters. The Laboratory exports and imports the same JSON the app
-  and the Python tools use.
+  fixture through the built site in headless Chromium, as linear P3 and through the sRGB canvas's path, and
+  compares: worst error 1.4e-4 and 0.014 ΔE00, against bounds of 5e-4 and 0.1 ΔE00 per colour (the app's
+  simulator test allows 7.5e-3).
+* The shipped look is `src/engine/technichromeV1.json` and the dye sets are `src/engine/dyeSets.json`, both
+  exported from the fixture (`export_fixtures.py --web`); the parity test fails if either drifts from the
+  prototype. The Laboratory exports and imports the same JSON the app and the Python tools use.
 
 Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in the tab.
 
@@ -85,6 +88,11 @@ Nothing leaves the device: RAW decoding, the engine, and JPEG export all run in 
 * **A look as a link.** *Copy link* in the Laboratory puts the current look (parameters and print exposure,
   deflated, about 1 KB) in the address bar and on the clipboard; opening that link anywhere applies the look,
   so a look tuned on a desk reaches a phone without a file. The JSON export remains the form the app reads.
+* **Dye sets.** Next to the print era, the Laboratory offers three dye sets, as the app does: Technichrome v1's
+  own dyes (the shipped look), *US 1949* and *UK*, fitted to published measurements of Technicolor prints
+  (a 1949 *Samson and Delilah* trailer; a British leader, NSMM 12593), each with the dye contrasts that keep
+  greys neutral with it. Choosing one replaces the three dyes and their contrasts; editing any of them makes
+  the dyes custom. Their sources and uncertainty are in `docs/COLOR_SCIENCE.md`.
 * **Halation and misregistration.** The Spatial section of the Laboratory has the app's four other spatial
   sliders. *Halation* adds a glow of the highlights above *Halation threshold* (in the file's own linear units,
   before exposure and timing, as in the app) blurred over *Halation radius* percent of the long edge, to the scene
