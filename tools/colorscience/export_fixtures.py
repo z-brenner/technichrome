@@ -2,8 +2,11 @@
 (inputs → dye densities, key density, outputs in Display P3 and as the sRGB print) so the Swift unit tests can verify the port: one block for the
 shipped look and one for each parameter variant in VARIANTS, on the same inputs.
 
+The fixture also carries the dye sets the Laboratory offers (tcengine.DYE_SETS), which the Swift and web presets must
+equal, and a variant block for each measured set, so every implementation is checked on those dyes too.
+
 usage: python3 export_fixtures.py ../../Tests/TechnichromeCoreTests/Fixtures/parity.json [--web ../../web/src/engine]
-       (--web also writes the shipped look as technichromeV1.json for the web version)
+       (--web also writes the shipped look as technichromeV1.json and the dye sets as dyeSets.json for the web version)
 """
 import sys, os, json
 import numpy as np
@@ -16,6 +19,11 @@ def curve_json(dmin, dmax, gamma, log_e0, nu):
 
 def dye_json(dye):
     return {"lobes": [{"mu": l[0], "sigmaLeft": l[1], "sigmaRight": l[2], "amplitude": l[3], "shape": (l[4] if len(l) > 4 else 2.0)} for l in dye.lobes]}
+
+
+def dye_set_json(ds: T.DyeSetPreset):
+    return {"name": ds.name, "label": ds.label, "cyan": dye_json(ds.dyes.cyan), "magenta": dye_json(ds.dyes.magenta),
+            "yellow": dye_json(ds.dyes.yellow), "dyeGain": list(ds.gains), "source": ds.source}
 
 
 def params_to_swift_json(eng: T.Engine, name="Technichrome v1"):
@@ -38,6 +46,27 @@ def params_to_swift_json(eng: T.Engine, name="Technichrome v1"):
     }
 
 
+def swift_dye(dye, indent):
+    sep = ",\n" + " " * indent
+    lobes = sep.join(f"DyeLobe(mu: {l[0]}, sigmaLeft: {l[1]}, sigmaRight: {l[2]}, amplitude: {l[3]:.2f}, shape: {(l[4] if len(l) > 4 else 2.0)})" for l in dye.lobes)
+    return f"DyeSpectrum(lobes: [{lobes}])"
+
+
+def swift_dye_sets():
+    """The Swift source for EngineParameters.dyeSets (tcengine.DYE_SETS)."""
+    out = []
+    for ds in T.DYE_SETS.values():
+        g = ds.gains
+        out.append(f"""        DyeSetPreset(
+            name: "{ds.name}", label: "{ds.label}",
+            cyan: {swift_dye(ds.dyes.cyan, 37)},
+            magenta: {swift_dye(ds.dyes.magenta, 40)},
+            yellow: {swift_dye(ds.dyes.yellow, 39)},
+            dyeGain: [{g[0]:.4f}, {g[1]:.4f}, {g[2]:.4f}],
+            source: "{ds.source}"),""")
+    return "\n".join(out)
+
+
 def swift_literal(eng: T.Engine):
     """Print the Swift source for EngineParameters.technichromeV1's numeric fields."""
     p = eng.p
@@ -54,8 +83,7 @@ def swift_literal(eng: T.Engine):
     out.append(f"        printDMin: {p.print_dmin},")
     out.append(f"        projectorCCT: {p.projector_cct},")
     for name, dye in (("cyan", eng.dyes.cyan), ("magenta", eng.dyes.magenta), ("yellow", eng.dyes.yellow)):
-        lobes = ",\n                                  ".join(f"DyeLobe(mu: {l[0]}, sigmaLeft: {l[1]}, sigmaRight: {l[2]}, amplitude: {l[3]:.2f}, shape: {(l[4] if len(l) > 4 else 2.0)})" for l in dye.lobes)
-        out.append(f"        {name}: DyeSpectrum(lobes: [{lobes}]),")
+        out.append(f"        {name}: {swift_dye(dye, 34)},")
     out.append(f"        surroundExponent: {p.surround_exponent}, screenFlare: {p.screen_flare},")
     out.append(f"        timingStrength: {p.timing_strength}, timingTarget: {p.timing_target}, timingLimit: {p.timing_limit},")
     out.append(f"        diffusionSigmaAt4K: {p.diffusion_sigma_px_at_4k},")
@@ -64,10 +92,13 @@ def swift_literal(eng: T.Engine):
 
 # Parameter sets every implementation is checked on besides the shipped look, one fixture block each: three
 # different dye D max, so that each matrix curve has its own steepness (the shipped look's three are equal),
-# and printer lights with screen flare and no key (the set the app's GPU tests also run).
+# printer lights with screen flare and no key (the set the app's GPU tests also run), and the shipped look with each
+# measured dye set of tcengine.DYE_SETS ("dye_set": its dyes and its gains).
 VARIANTS = [
     ("unequal dye D max", {"dye_dmax": (3.1, 2.6, 2.3)}),
     ("printer lights, screen flare, no key", {"dye_light_ev": (0.3, -0.1, 0.15), "screen_flare": 1.0 / 64.0, "key_strength": 0.0}),
+    ("US 1949 dyes", {"dye_set": "US 1949 (Samson and Delilah)"}),
+    ("UK dyes", {"dye_set": "UK (NSMM 12593)"}),
 ]
 
 
@@ -83,7 +114,12 @@ def fixture_inputs():
 
 
 def variant_engine(overrides):
-    return T.Engine(T.EngineParams(**overrides), lut_size=17)
+    overrides = dict(overrides)
+    dyes = T.DEFAULT_DYES
+    if 'dye_set' in overrides:
+        ds = T.DYE_SETS[overrides.pop('dye_set')]
+        dyes, overrides['dye_gain'] = ds.dyes, ds.gains
+    return T.Engine(T.EngineParams(**overrides), dyes=dyes, lut_size=17)
 
 
 def variant_name(name):
@@ -110,7 +146,8 @@ if __name__ == '__main__':
     for name, overrides in VARIANTS:
         ve = variant_engine(overrides)
         variants.append({"name": name, "parameters": params_to_swift_json(ve, name=variant_name(name)), "samples": fixture_samples(ve, inputs)})
-    fixture = {"parameters": params_to_swift_json(eng), "lutDimension": 17, "displaySpace": eng.p.display, "samples": samples, "variants": variants}
+    fixture = {"parameters": params_to_swift_json(eng), "lutDimension": 17, "displaySpace": eng.p.display, "samples": samples, "variants": variants,
+               "dyeSets": [dye_set_json(ds) for ds in T.DYE_SETS.values()]}
     path = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else 'parity.json'
     json.dump(fixture, open(path, 'w'), indent=1)
     print('wrote', path, len(samples), 'samples for the shipped look and for each of', len(variants), 'variants')
@@ -118,6 +155,8 @@ if __name__ == '__main__':
         web = sys.argv[sys.argv.index('--web') + 1]
         with open(os.path.join(web, 'technichromeV1.json'), 'w') as f:
             json.dump(fixture['parameters'], f, indent=1)
-        print('wrote', os.path.join(web, 'technichromeV1.json'))
+        with open(os.path.join(web, 'dyeSets.json'), 'w') as f:
+            json.dump(fixture['dyeSets'], f, indent=1)
+        print('wrote', os.path.join(web, 'technichromeV1.json'), 'and dyeSets.json')
     if '--swift' in sys.argv:
         print(swift_literal(eng))

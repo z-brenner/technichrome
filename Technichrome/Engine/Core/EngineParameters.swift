@@ -6,7 +6,8 @@
 //  The struct is Codable so presets can be stored as JSON and edited in the in-app Laboratory.
 //
 //  Which numbers are historically documented and which are artistic approximations is
-//  discussed in docs/COLOR_SCIENCE.md. Nothing here is a measurement of a real print.
+//  discussed in docs/COLOR_SCIENCE.md. The dye sets other than Technichrome v1's own are fitted to
+//  measured spectra of Technicolor prints (digitised from published figures); nothing else is a measurement.
 //
 
 import Foundation
@@ -68,6 +69,25 @@ public struct CurveParameters: Codable, Equatable, Sendable {
 
     public init(dMin: Double, dMax: Double, gamma: Double, logE0: Double, nu: Double) {
         self.dMin = dMin; self.dMax = dMax; self.gamma = gamma; self.logE0 = logE0; self.nu = nu
+    }
+}
+
+/// A dye set the Laboratory offers: three dyes, the dye gains (contrast multipliers) that print greys neutral with them
+/// and the rest of the shipped look (tcengine.calibrate_neutral), a short label and where the spectra come from.
+public struct DyeSetPreset: Codable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let label: String
+    public let cyan: DyeSpectrum
+    public let magenta: DyeSpectrum
+    public let yellow: DyeSpectrum
+    public let dyeGain: [Double]
+    public let source: String
+
+    public var id: String { name }
+
+    public init(name: String, label: String, cyan: DyeSpectrum, magenta: DyeSpectrum, yellow: DyeSpectrum, dyeGain: [Double], source: String) {
+        self.name = name; self.label = label; self.cyan = cyan; self.magenta = magenta; self.yellow = yellow
+        self.dyeGain = dyeGain; self.source = source
     }
 }
 
@@ -243,6 +263,61 @@ public struct EngineParameters: Codable, Equatable, Sendable {
     )
 
     public static let `default` = technichromeV1
+
+    // MARK: - Dye sets
+
+    /// The dye sets the Laboratory offers next to the print era: Technichrome v1's own dyes, and two sets fitted to
+    /// measured Technicolor dyes (a 1949 US trailer, a British museum leader), each with the gains that print greys
+    /// neutral with it and the rest of the shipped look. Generated from tcengine.DYE_SETS by
+    /// tools/colorscience/sync_swift.py; the parity fixture checks they are the prototype's. Sources and uncertainty:
+    /// docs/COLOR_SCIENCE.md.
+    public static let dyeSets: [DyeSetPreset] = [
+        DyeSetPreset(
+            name: "Technichrome v1", label: "Technichrome v1",
+            cyan: DyeSpectrum(lobes: [DyeLobe(mu: 652.0, sigmaLeft: 52.0, sigmaRight: 62.0, amplitude: 1.00, shape: 3.0),
+                                     DyeLobe(mu: 540.0, sigmaLeft: 45.0, sigmaRight: 40.0, amplitude: 0.22, shape: 2.0),
+                                     DyeLobe(mu: 440.0, sigmaLeft: 35.0, sigmaRight: 35.0, amplitude: 0.12, shape: 2.0)]),
+            magenta: DyeSpectrum(lobes: [DyeLobe(mu: 545.0, sigmaLeft: 42.0, sigmaRight: 42.0, amplitude: 1.00, shape: 3.5),
+                                        DyeLobe(mu: 440.0, sigmaLeft: 40.0, sigmaRight: 35.0, amplitude: 0.22, shape: 2.0),
+                                        DyeLobe(mu: 640.0, sigmaLeft: 25.0, sigmaRight: 40.0, amplitude: 0.04, shape: 2.0)]),
+            yellow: DyeSpectrum(lobes: [DyeLobe(mu: 445.0, sigmaLeft: 45.0, sigmaRight: 40.0, amplitude: 1.00, shape: 3.5),
+                                       DyeLobe(mu: 505.0, sigmaLeft: 15.0, sigmaRight: 30.0, amplitude: 0.08, shape: 2.0)]),
+            dyeGain: [1.2022, 0.9087, 0.8892],
+            source: "The engine's own block dyes (Round 1): an approximation, not a measurement."),
+        DyeSetPreset(
+            name: "US 1949 (Samson and Delilah)", label: "US 1949",
+            cyan: DyeSpectrum(lobes: [DyeLobe(mu: 649.0, sigmaLeft: 40.0, sigmaRight: 106.0, amplitude: 1.00, shape: 2.15),
+                                     DyeLobe(mu: 559.0, sigmaLeft: 16.0, sigmaRight: 72.0, amplitude: 0.08, shape: 2.0),
+                                     DyeLobe(mu: 391.0, sigmaLeft: 58.0, sigmaRight: 59.0, amplitude: 0.17, shape: 2.0)]),
+            magenta: DyeSpectrum(lobes: [DyeLobe(mu: 544.0, sigmaLeft: 45.0, sigmaRight: 51.0, amplitude: 1.00, shape: 2.76),
+                                        DyeLobe(mu: 405.0, sigmaLeft: 120.0, sigmaRight: 12.0, amplitude: 0.12, shape: 2.0)]),
+            yellow: DyeSpectrum(lobes: [DyeLobe(mu: 457.0, sigmaLeft: 62.0, sigmaRight: 37.0, amplitude: 1.00, shape: 2.34)]),
+            dyeGain: [1.0862, 0.9606, 0.9532],
+            source: "Fitted to the absorbances FilmColors extracted from a multispectral scan of a 1949 Samson and Delilah trailer (relative units, zero unknown)."),
+        DyeSetPreset(
+            name: "UK (NSMM 12593)", label: "UK",
+            cyan: DyeSpectrum(lobes: [DyeLobe(mu: 642.0, sigmaLeft: 54.0, sigmaRight: 37.0, amplitude: 1.00, shape: 1.99),
+                                     DyeLobe(mu: 502.0, sigmaLeft: 35.0, sigmaRight: 23.0, amplitude: 0.04, shape: 2.0),
+                                     DyeLobe(mu: 408.0, sigmaLeft: 120.0, sigmaRight: 38.0, amplitude: 0.18, shape: 2.0)]),
+            magenta: DyeSpectrum(lobes: [DyeLobe(mu: 542.0, sigmaLeft: 47.0, sigmaRight: 47.0, amplitude: 1.00, shape: 2.39),
+                                        DyeLobe(mu: 380.0, sigmaLeft: 98.0, sigmaRight: 89.0, amplitude: 0.35, shape: 2.0),
+                                        DyeLobe(mu: 650.0, sigmaLeft: 24.0, sigmaRight: 29.0, amplitude: 0.11, shape: 2.0)]),
+            yellow: DyeSpectrum(lobes: [DyeLobe(mu: 390.0, sigmaLeft: 91.0, sigmaRight: 91.0, amplitude: 1.00, shape: 3.42),
+                                       DyeLobe(mu: 550.0, sigmaLeft: 18.0, sigmaRight: 29.0, amplitude: 0.07, shape: 2.0),
+                                       DyeLobe(mu: 657.0, sigmaLeft: 24.0, sigmaRight: 47.0, amplitude: 0.05, shape: 2.0)]),
+            dyeGain: [1.1225, 0.9391, 0.9384],
+            source: "Fitted to FilmColors' multispectral measurement of pure-dye areas of a British leader, National Science and Media Museum NSMM 12593 (absolute absorbance, date unknown)."),
+    ]  // end of dyeSets (generated)
+
+    /// Takes a dye set's dyes and gains (the Laboratory's dye-set choice); everything else stays.
+    public mutating func useDyeSet(_ set: DyeSetPreset) {
+        cyan = set.cyan; magenta = set.magenta; yellow = set.yellow; dyeGain = set.dyeGain
+    }
+
+    /// The dye set whose dyes and gains these parameters carry, if any (none once a dye or a gain is edited).
+    public var dyeSet: DyeSetPreset? {
+        Self.dyeSets.first { $0.cyan == cyan && $0.magenta == magenta && $0.yellow == yellow && $0.dyeGain == dyeGain }
+    }
 
     // MARK: - JSON
 

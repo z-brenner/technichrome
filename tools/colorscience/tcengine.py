@@ -247,6 +247,52 @@ class EngineParams:
 
 
 # ----------------------------------------------------------------------------
+# 4b. Dye sets: the engine's own lobes and two fitted to measured Technicolor dyes
+# ----------------------------------------------------------------------------
+@dataclass
+class DyeSetPreset:
+    """A dye set the Laboratory offers: three dyes, the contrast multipliers (dye gains) that print greys neutral with
+    them and the shipped look's other parameters (calibrate_neutral; set_params.py --calibrate re-balances them), a
+    short label and where the spectra come from. docs/COLOR_SCIENCE.md gives each set's sources and uncertainty."""
+    name: str
+    label: str
+    dyes: DyeSet
+    gains: tuple
+    source: str
+
+
+# The lobes of the measured sets are least-squares fits by fit_dyes.py to spectra digitised from FilmColors' figures
+# (data/technicolor_dyes_digitised.csv; estimates, about ±0.02 absorbance). There was no single Technicolor dye set:
+# the dyes were blends, changed over the years and differed between London and Hollywood.
+DYE_SETS = {
+    'Technichrome v1': DyeSetPreset(
+        name='Technichrome v1', label='Technichrome v1', dyes=DEFAULT_DYES,
+        gains=EngineParams.dye_gain,
+        source='The engine\'s own block dyes (Round 1): an approximation, not a measurement.'),
+    'US 1949 (Samson and Delilah)': DyeSetPreset(
+        name='US 1949 (Samson and Delilah)', label='US 1949',
+        dyes=DyeSet(
+            cyan=Dye([(649.0, 40.0, 106.0, 1.00, 2.15), (559.0, 16.0, 72.0, 0.08, 2.0), (391.0, 58.0, 59.0, 0.17, 2.0)]),
+            magenta=Dye([(544.0, 45.0, 51.0, 1.00, 2.76), (405.0, 120.0, 12.0, 0.12, 2.0)]),
+            yellow=Dye([(457.0, 62.0, 37.0, 1.00, 2.34)]),
+        ),
+        gains=(1.0862, 0.9606, 0.9532),
+        source='Fitted to the absorbances FilmColors extracted from a multispectral scan of a 1949 Samson and Delilah '
+               'trailer (relative units, zero unknown).'),
+    'UK (NSMM 12593)': DyeSetPreset(
+        name='UK (NSMM 12593)', label='UK',
+        dyes=DyeSet(
+            cyan=Dye([(642.0, 54.0, 37.0, 1.00, 1.99), (502.0, 35.0, 23.0, 0.04, 2.0), (408.0, 120.0, 38.0, 0.18, 2.0)]),
+            magenta=Dye([(542.0, 47.0, 47.0, 1.00, 2.39), (380.0, 98.0, 89.0, 0.35, 2.0), (650.0, 24.0, 29.0, 0.11, 2.0)]),
+            yellow=Dye([(390.0, 91.0, 91.0, 1.00, 3.42), (550.0, 18.0, 29.0, 0.07, 2.0), (657.0, 24.0, 47.0, 0.05, 2.0)]),
+        ),
+        gains=(1.1225, 0.9391, 0.9384),
+        source='Fitted to FilmColors\' multispectral measurement of pure-dye areas of a British leader, '
+               'National Science and Media Museum NSMM 12593 (absolute absorbance, date unknown).'),
+}
+
+
+# ----------------------------------------------------------------------------
 # 5. The engine
 # ----------------------------------------------------------------------------
 class Engine:

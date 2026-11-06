@@ -5,10 +5,13 @@ three-strip Technicolor process (Process No. IV, 1932–1955): three separation 
 through a beam-splitter camera, printed as gelatin relief matrices, and transferred as three dyes
 onto a blank print, which is then projected. The model is called the *imbibition model* in the code.
 
-Everything below is labelled **documented** (a property of the historical process with a source) or
-**approximation** (our engineering choice, tuned by eye). We have no measurements of real Technicolor
-prints or dyes; the numbers in `EngineParameters.technichromeV1` are a starting point for comparison
-against reference frames, which is why every one of them is adjustable in the app's Laboratory.
+Everything below is labelled **documented** (a property of the historical process with a source),
+**measured** (fitted to a published measurement of real prints) or **approximation** (our engineering
+choice, tuned by eye). The only measurements are published absorbance spectra of the dyes of two
+Technicolor prints, digitised from figures, behind two of the Laboratory's three dye sets ([6]); the
+shipped look keeps its own dyes for now. The numbers in `EngineParameters.technichromeV1` are a
+starting point for comparison against reference frames, which is why every one of them is adjustable
+in the app's Laboratory.
 
 ## What the process was
 
@@ -74,11 +77,14 @@ gain_i · D max_i, the most of that dye the print carries, so each axis of the t
 [0, gain · D max] and the three dyes reach its edge together. Until Round 25 the axes stopped at D max:
 cyan, whose gain is above 1, reached the edge while magenta and yellow still rose, and the deepest
 blacks (scene greys below about 2^−8, under L* 2) lost cyan and turned red, C*ab 1.4 at 2^−14 against
-0.6 now. The gains are therefore part of the table, and changing one re-bakes it. `ReferencePipeline.swift` is the scalar
-specification; `tools/colorscience/tcengine.py` is the prototype; the unit tests check that the two
-agree to 1e-7 on the densities and 1e-6 on the output (they measure about 1e-15 and 1.6e-8, the
-latter the table's float32 storage), on a fixture that covers the shipped look and two variants of it
-(three different dye D max; printer lights with screen flare and no key).
+0.6 now. The gains are therefore part of the table, and changing one re-bakes it.
+
+`ReferencePipeline.swift` is the scalar specification; `tools/colorscience/tcengine.py` is the
+prototype; the unit tests check that the two agree to 1e-7 on the densities and 1e-6 on the output
+(they measure about 1e-15 and 2e-8, the latter the table's float32 storage), on a fixture that covers
+the shipped look and four variants of it (three different dye D max; printer lights with screen flare
+and no key; each measured dye set of [6]), each output both as the P3 print and as the sRGB print.
+The fixture also carries the dye sets themselves, which the app's and the web's presets must equal.
 
 **The bake.** The print's transmittance factorises per dye, 10^−(Σ dᵢ·aᵢ(λ) + Dmin) =
 T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so the table is baked from three tables of 33 × 95 transmittances
@@ -163,11 +169,22 @@ than being 60 % undone by the timer. The live preview is timed the same way — 
 frames about twice a second and smoothed — so what the preview shows is the timed print, not the
 untimed one.
 
-### [6] Dyes — approximation informed by the literature
+### [6] Dyes — three sets: the engine's own (approximation) and two measured
 
-No spectral curves of Technicolor's dyes are publicly tabulated as far as we know. We model each dye
-as a flat-topped main absorption band plus the unwanted absorptions every real dye of the period had
-(Hunt, *The Reproduction of Colour*; Evans, Hanson & Brewer):
+Each dye is a main absorption band, an asymmetric generalised Gaussian exp(−½·|(λ−μ)/σ|^shape) whose
+shape exponent sets how flat its top is (2 is a Gaussian, 3–4 a flat-topped "block"), plus smaller
+lobes for the unwanted absorptions every real dye has (Hunt, *The Reproduction of Colour*). The
+Laboratory offers three dye sets, next to the print era. Each carries its own dye gains, the contrast
+multipliers that print greys neutral with those dyes and the rest of the shipped look
+(`calibrate_neutral`; `set_params.py --calibrate` re-balances them all), so choosing a set keeps greys
+grey. The shipped look uses Technichrome v1's. There was no single Technicolor dye set to model:
+each dye was a blend of several (Cornwell-Clyne, *Colour Cinematography*, 3rd ed. 1951, pp. 466–467,
+whose recipes he calls "schematic only"; George Eastman Museum), the blends were "regularly modified"
+and differed between London and Hollywood (Ruivo, *Film Atlas*), and FilmColors' authors write that
+their development "has not been documented to date".
+
+**Technichrome v1 — approximation (the default).** Our own dyes, from before any measurement was at
+hand; gains 1.202 / 0.909 / 0.889.
 
 * **Cyan** — peak 652 nm, broad (σ 52/62, shape 3), plus 22 % unwanted green absorption and 12 % blue.
   Deliberately the least pure dye, as the dye-transfer literature says. This is what makes blues deep
@@ -175,9 +192,64 @@ as a flat-topped main absorption band plus the unwanted absorptions every real d
 * **Magenta** — peak 545 nm (σ 42, shape 3.5), 22 % unwanted blue absorption, a trace in the red.
 * **Yellow** — peak 445 nm (σ 45/40, shape 3.5), a small tail into the green. Nearly pure.
 
-Flat-topped ("block") bands matter: Gaussian dyes leak light at the band edges and produce muddy,
-desaturated prints (that was our first iteration). Block dyes give the pure, dense reds — full
-magenta plus full yellow and no cyan — that Ball describes.
+We chose flat-topped bands because Gaussian dyes printed muddy, desaturated colour in our first
+iteration, and block dyes give the pure, dense reds (full magenta plus full yellow and no cyan) that
+Ball describes. The measurements below support the peaks (cyan 640–660 nm, magenta 530–545 nm) but not
+the shape: fitted to measured curves, the main bands of cyan, magenta and the US yellow have shape
+exponents of 2.0 to 2.8, not 3 to 3.5, and spectrophotometer curves show edges 1.5 to 2 times wider. Magenta is broader (σ 45–51) and still absorbs 0.17–0.29 of its peak
+at 620 nm, where v1's absorbs 0.05. The muddiness we removed may be what the real dyes did.
+
+**US 1949 — measured (FilmColors, *Samson and Delilah*).** Fitted to the absorbances FilmColors
+extracted "with a statistical method from multispectral image capture" of the trailer of *Samson and
+Delilah* (USA 1949) (filmcolors.org, Technicolor No. IV timeline entry; figure credit Giorgio Trumpy).
+Cyan peaks at 647 nm and stays high into the far red (0.84 of its peak at 710 nm); magenta peaks at
+544 nm (shape 2.8) with little blue absorption (0.06 at 420 nm) and 0.22 at 620 nm; yellow peaks at
+457 nm (shape 2.3) and is pure (0.04 at 540 nm). Gains 1.086 / 0.961 / 0.953. With
+these dyes greys print the most neutral of the three (C*ab at most 0.1 down to the deepest black).
+Uncertainty:
+
+* The curve has no y scale, so each dye's lowest value between 400 and 710 nm is taken as zero
+  absorbance. The extraction depends on its statistical model (Ohta's method rotated toward block
+  dyes).
+* The extracted magenta rises again above 660 nm and the yellow above 570 nm. Spectrophotometer
+  eigenspectra of the same trailer (Flueckiger et al. 2018, Fig. 16) show almost nothing there, so
+  those ranges are left out of the fit as extraction artefacts.
+* Those eigenspectra disagree with the extracted curves elsewhere, most in cyan's green absorption
+  (0.29 of the peak at 540 nm against 0.06): rms 0.14 (cyan), 0.08 (magenta), 0.07 (yellow) between
+  the two, normalised alike. The same lobes fitted to the eigenspectra (read at only 14 wavelengths)
+  print the Kodak test images 4.5 ΔE00 away on average and up to 22. This is the largest uncertainty
+  of any set.
+* Fit: rms 0.009 / 0.018 / 0.015 of the peak (cyan / magenta / yellow), at most 0.044. Printed through
+  the engine, the fitted lobes and the digitised curves differ by 0.3 ΔE00 on average, at most 0.9.
+
+**UK — measured (FilmColors, NSMM 12593).** Fitted to FilmColors' "absorbances measured with a
+multispectral imaging system from film areas with pure dyes" on a British leader in the National
+Science and Media Museum, Bradford (NSMM 12593; date and production not stated). The figure is in
+absolute absorbance, so one neutral base density is taken out of all three dyes: 0.08, the lowest
+reading in the figure (magenta at 710 nm), which bounds base plus stain from above (the engine adds its
+own base density, 0.06). Each dye keeps what it absorbs above that, unwanted absorptions included.
+Cyan peaks at 642 nm and falls to half by 685 nm; magenta peaks at 536 nm (main band shape 2.4) and
+keeps 0.30 of its peak in the blue (420–440 nm) and 0.23 at 620 nm; yellow peaks at or below 400 nm,
+consistent with the "brilliant yellow" direct dyes of the British recipe, and keeps 0.12 at 540 nm. Gains 1.123 / 0.939 / 0.938. With these dyes the deepest shadows (L* under
+8) keep a slight tint (C*ab 1.5 to 1.7) that three contrast multipliers cannot balance, a mild case of
+the "unwanted hues" in blacks that period sources describe. Uncertainty:
+
+* Whether the absorbance is relative to air or to clear film is not stated. Taking each dye's own
+  minimum as its zero instead, as for the extracted curves, moves the print by 1.4 ΔE00 on average on
+  a ColorChecker, at most 4.3.
+* One sample: the same fit to FilmColors' extracted curves of another British print (NSMM 12484)
+  prints 1.8 ΔE00 away on average on the Kodak images, at most 4.5.
+* The yellow below 400 nm, where nothing was measured, is an extrapolation (a symmetric band peaking
+  at 390 nm); the eye barely sees that range.
+* Multispectral bands about 16 nm wide smooth the edges; the spectrophotometer data agree on their
+  width.
+* Fit: rms 0.008 / 0.007 / 0.010 of the peak, at most 0.030. The fitted lobes and the digitised curves
+  print 0.1 ΔE00 apart on average, at most 0.4.
+
+Both measured sets come from a digitisation of the published JPEG figures by colour mask, about ±0.02
+absorbance (`tools/colorscience/data/technicolor_dyes_digitised.csv`, with the provenance of every
+column); `fit_dyes.py` fits and checks them. Technicolor dyes are reported not to fade in dark storage
+(Haines, *Film Atlas*), but the samples' ages are partly unknown.
 
 ### [7] Projection — approximation
 

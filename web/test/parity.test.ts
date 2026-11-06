@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ReferencePipeline } from '../src/engine/reference';
-import { TECHNICHROME_V1, parametersFromJSON, type EngineParameters } from '../src/engine/parameters';
+import { DYE_SETS, TECHNICHROME_V1, cloneParameters, dyeSetOf, parametersFromJSON, useDyeSet, type DyeSetPreset, type EngineParameters } from '../src/engine/parameters';
 import { timingExposureEV, geometricMeanLuminance } from '../src/engine/timing';
 import { CMF_TABLE, WAVELENGTHS, dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, xyzOf, SRGB_TO_XYZ, P3_TO_SRGB, P3_TO_XYZ, SRGB_TO_P3 } from '../src/engine/spectral';
 import { PrintModel, buildLUT, lookupLUT, softClipGamut } from '../src/engine/printModel';
@@ -17,6 +17,7 @@ interface Fixture {
   displaySpace: string;
   samples: Sample[];
   variants: { name: string; parameters: EngineParameters; samples: Sample[] }[];
+  dyeSets: DyeSetPreset[];
 }
 
 const fixturePath = fileURLToPath(new URL('../../Tests/TechnichromeCoreTests/Fixtures/parity.json', import.meta.url));
@@ -26,7 +27,20 @@ const blocks = [{ name: 'shipped look', parameters: fixture.parameters, samples:
 describe('parity with the Python prototype', () => {
   it('ships the same parameters as the fixture', () => {
     expect(TECHNICHROME_V1).toEqual(fixture.parameters);
-    expect(fixture.variants.map((v) => v.name)).toEqual(['unequal dye D max', 'printer lights, screen flare, no key']);
+    expect(fixture.variants.map((v) => v.name)).toEqual(['unequal dye D max', 'printer lights, screen flare, no key', 'US 1949 dyes', 'UK dyes']);
+  });
+
+  it('offers the prototype\'s dye sets, the shipped look carrying the first', () => {
+    expect(DYE_SETS).toEqual(fixture.dyeSets);
+    expect(dyeSetOf(TECHNICHROME_V1)?.name).toBe('Technichrome v1');
+    for (const [set, block] of [['US 1949 (Samson and Delilah)', 'US 1949 dyes'], ['UK (NSMM 12593)', 'UK dyes']]) {
+      const preset = DYE_SETS.find((d) => d.name === set)!;
+      const variant = fixture.variants.find((v) => v.name === block)!;
+      const p = cloneParameters(TECHNICHROME_V1);
+      useDyeSet(p, preset);
+      expect(dyeSetOf(p)?.name).toBe(set);
+      expect({ ...p, name: variant.parameters.name }).toEqual(variant.parameters);
+    }
   });
 
   it.each(blocks.map((b) => [b.name, b] as const))('reproduces dye densities, key density and output on every fixture sample (%s)', (name, block) => {

@@ -4,7 +4,7 @@ import json, os, sys
 import numpy as np
 import tcengine as T
 import tcspectral as S
-from export_fixtures import VARIANTS, params_to_swift_json, variant_engine, variant_name
+from export_fixtures import VARIANTS, dye_set_json, params_to_swift_json, variant_engine, variant_name
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 FIXTURE = os.path.join(ROOT, 'Tests', 'TechnichromeCoreTests', 'Fixtures', 'parity.json')
@@ -66,6 +66,16 @@ def main():
         ve = variant_engine(overrides)
         check_parameters(params_to_swift_json(ve, name=variant_name(name)), block['parameters'])
         engines.append((ve, block['samples']))
+    # 1b. the dye sets: the fixture's are the prototype's (the Swift and web presets are checked against the fixture's),
+    # "Technichrome v1" is the shipped dyes and gains, and every set's gains still print greys neutral, i.e. they are
+    # what calibrate_neutral gives with the current look (to the four decimals they carry)
+    assert fx['dyeSets'] == [dye_set_json(ds) for ds in T.DYE_SETS.values()], "fixture dye sets differ from tcengine.DYE_SETS"
+    v1 = T.DYE_SETS['Technichrome v1']
+    assert v1.dyes is T.DEFAULT_DYES and tuple(v1.gains) == tuple(T.EngineParams().dye_gain)
+    assert {o.get('dye_set') for _, o in VARIANTS} >= {n for n in T.DYE_SETS if n != 'Technichrome v1'}, "a measured dye set has no fixture block"
+    for name, ds in T.DYE_SETS.items():
+        g = T.Engine(T.EngineParams(dye_gain=ds.gains), dyes=ds.dyes, lut_size=5).calibrate_neutral()
+        assert np.max(np.abs(np.array(g) - np.array(ds.gains))) < 1e-4, f"{name}: gains {ds.gains} no longer balance greys ({np.round(g, 4)}); run set_params.py --calibrate"
     # 2. outputs reproduce, for the shipped look and every variant
     worst = max(worst_output_error(e, samples) for e, samples in engines)
     assert worst < 1e-6, f"fixture outputs drifted by {worst}"
@@ -75,16 +85,18 @@ def main():
         direct = T.soft_clip_gamut(e.display_linear_from_densities(e.lut_node_densities(n)))
         cube_err = float(np.max(np.abs(e.lut - direct)))
         assert cube_err < 1e-6, f"factorised cube differs from direct evaluation by {cube_err} at {n}³"
-    # 3. invariants: neutral stays neutral and monotonic; saturated red stays red and dark
-    last = 1e9
-    for stop in np.arange(2.0, -8.0, -0.5):
-        g = 2.0 ** stop
-        out = eng.develop(np.array([[g, g, g]]))[0]
-        y = out.mean()
-        assert y <= last + 1e-9, f"grey scale not monotonic at {stop}"
-        if y > 0.01:
-            assert abs(out[0] - out[1]) / y < 0.12 and abs(out[2] - out[1]) / y < 0.12, f"grey not neutral at {stop}: {out}"
-        last = y
+    # 3. invariants: neutral stays neutral and monotonic (with every dye set); saturated red stays red and dark
+    for name, ds in T.DYE_SETS.items():
+        e = eng if name == 'Technichrome v1' else T.Engine(T.EngineParams(dye_gain=ds.gains), dyes=ds.dyes, lut_size=17)
+        last = 1e9
+        for stop in np.arange(2.0, -8.0, -0.5):
+            g = 2.0 ** stop
+            out = e.develop(np.array([[g, g, g]]))[0]
+            y = out.mean()
+            assert y <= last + 1e-9, f"{name}: grey scale not monotonic at {stop}"
+            if y > 0.01:
+                assert abs(out[0] - out[1]) / y < 0.12 and abs(out[2] - out[1]) / y < 0.12, f"{name}: grey not neutral at {stop}: {out}"
+            last = y
     # 3b. the deepest blacks keep the hue of the shadows: every dye reaches the edge of its cube together (each axis
     # spans gain · D max), so cyan does not run out first and turn the blacks red (C*ab was 1.4 at 2^-14 when the
     # cube stopped at D max)

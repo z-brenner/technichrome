@@ -227,6 +227,13 @@ struct LaboratoryView: View {
                 Text("custom").tag(KeyEra.custom)
             }
             .pickerStyle(.menu)
+            Picker("Dye set", selection: dyeSetName) {
+                ForEach(EngineParameters.dyeSets) { set in Text(set.label).tag(Optional(set.name)) }
+                Text("custom").tag(String?.none)
+            }
+            .pickerStyle(.menu)
+            Text(params.dyeSet?.source ?? "Custom: the dyes or their gains differ from every set.")
+                .font(.footnote).foregroundStyle(Theme.ivoryDim)
             slider("Key strength", $params.keyStrength, 0...1, step: 0.01, format: "%.2f")
             slider("Key gamma", $params.key.gamma, 0.2...2, step: 0.01, format: "%.2f")
             slider("Key printing light", $params.key.logE0, -2.5...0, step: 0.01, format: "%.2f")
@@ -291,6 +298,14 @@ struct LaboratoryView: View {
         } footer: {
             Text("Parameters marked as approximations in docs/COLOR_SCIENCE.md are starting points for comparison against reference frames, not measurements.")
         }
+    }
+
+    /// The dye set in use, by name (nil: custom dyes). Choosing one takes its three dyes and the gains that keep greys
+    /// neutral with them (docs/COLOR_SCIENCE.md); editing a dye or a gain afterwards makes the dyes custom.
+    private var dyeSetName: Binding<String?> {
+        Binding(get: { params.dyeSet?.name }, set: { name in
+            if let set = EngineParameters.dyeSets.first(where: { $0.name == name }) { params.useDyeSet(set) }
+        })
     }
 
     enum KeyEra: Hashable { case full, light, none, custom }

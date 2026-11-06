@@ -1,0 +1,49 @@
+# Technicolor No. IV (three-strip) imbibition dyes, absorbance spectra digitised from published figures. ESTIMATES:
+# read by colour-mask digitisation of the published JPEG plots (axes located from the gridlines), about +-0.02 absorbance
+# on the calibrated plot. Used by fit_dyes.py, which fits the engine's lobe model to them (tcengine.DYE_SETS).
+# NSMM12593_*: FilmColors (University of Zurich, ERC Advanced Grant FilmColors; figure credit Giorgio Trumpy), Timeline of
+#   Historical Film Colors, "Technicolor No. IV: Three-strip", https://filmcolors.org/timeline-entry/1301/ : National
+#   Science and Media Museum, Bradford, NSMM 12593 (a leader with Y, C, M letters; date and production not stated),
+#   "Absorbances measured with a multispectral imaging system from film areas with pure dyes". Absolute absorbance
+#   (plot axis 0-2), reference (air or clear film) not stated, so base + stain may be included. Yellow at 680 and 690 nm
+#   was hidden by other curves and is interpolated.
+# NSMM12484_*, SAMSON1949_*: same page; NSMM 12484 and the trailer of Samson and Delilah (USA 1949), "Dyes' absorbances
+#   extracted with a statistical method from multispectral image capture". Relative units, no y scale: the plot frame's
+#   bottom is taken as zero (the true zero is unknown).
+# FIG16_*: B. Flueckiger et al., Investigation of Film Material-Scanner Interaction (2018), sec. 2.8.2, Fig. 16:
+#   eigenspectra of the same Samson and Delilah trailer from 24 points measured on a Shimadzu UV-1800 spectrophotometer,
+#   rotated toward block dyes (Ohta's method); min-max normalised over 400-700 nm, read at 14 wavelengths only (blank
+#   elsewhere). Not fitted: a cross-check on the extracted Samson and Delilah curves.
+wavelength_nm,NSMM12593_cyan,NSMM12593_magenta,NSMM12593_yellow,NSMM12484_cyan,NSMM12484_magenta,NSMM12484_yellow,SAMSON1949_cyan,SAMSON1949_magenta,SAMSON1949_yellow,FIG16_cyan,FIG16_magenta,FIG16_yellow
+400,0.39,0.48,1.92,0.76,0.69,3.06,0.68,0.47,2.33,0.07,0.22,0.68
+410,0.39,0.46,1.90,0.64,0.69,3.23,0.62,0.41,2.58,,,
+420,0.38,0.45,1.86,0.55,0.69,3.33,0.57,0.29,2.85,,,
+430,0.35,0.43,1.81,0.48,0.69,3.31,0.56,0.11,3.14,,,
+440,0.31,0.45,1.76,0.46,0.75,3.15,0.52,0.14,3.24,0.00,0.21,0.97
+450,0.27,0.46,1.72,0.43,0.82,2.96,0.47,0.19,3.30,,,
+460,0.24,0.53,1.59,0.40,0.94,2.64,0.42,0.35,3.27,,,
+470,0.22,0.60,1.44,0.38,1.09,2.30,0.39,0.56,3.12,,,
+480,0.20,0.71,1.25,0.36,1.27,1.94,0.36,0.85,2.86,0.05,0.38,0.89
+490,0.21,0.86,1.00,0.34,1.52,1.57,0.30,1.33,2.40,,,
+500,0.22,1.00,0.79,0.34,1.74,1.20,0.25,1.85,1.87,0.12,0.60,0.64
+510,0.24,1.15,0.57,0.35,1.98,0.85,0.17,2.46,1.24,,,
+520,0.27,1.23,0.47,0.42,2.10,0.74,0.22,2.78,0.86,0.22,0.84,0.29
+530,0.31,1.29,0.37,0.52,2.19,0.62,0.27,3.01,0.56,,,
+540,0.40,1.29,0.31,0.66,2.17,0.56,0.35,3.02,0.51,0.29,1.00,0.13
+550,0.49,1.26,0.27,0.83,2.09,0.52,0.47,2.98,0.43,,,
+560,0.60,1.20,0.24,1.02,1.99,0.48,0.60,2.91,0.35,0.35,0.91,0.08
+570,0.76,1.10,0.21,1.28,1.78,0.42,0.76,2.71,0.43,,,
+580,0.94,0.98,0.17,1.56,1.52,0.36,0.97,2.50,0.47,0.45,0.82,0.05
+590,1.16,0.78,0.13,1.91,1.22,0.28,1.28,2.21,0.47,,,
+600,1.34,0.61,0.12,2.19,0.98,0.23,1.74,1.68,0.40,0.59,0.54,0.02
+610,1.49,0.46,0.11,2.44,0.76,0.19,2.23,1.20,0.33,,,
+620,1.59,0.37,0.12,2.71,0.64,0.20,2.61,0.73,0.39,0.70,0.17,0.01
+630,1.68,0.30,0.13,2.96,0.56,0.21,2.90,0.42,0.47,,,
+640,1.76,0.26,0.15,3.22,0.51,0.26,3.13,0.20,0.57,0.87,0.06,0.00
+650,1.72,0.23,0.17,3.12,0.45,0.27,3.19,0.20,0.65,,,
+660,1.58,0.21,0.17,2.77,0.36,0.23,3.18,0.26,0.65,1.00,0.00,0.03
+670,1.35,0.18,0.17,2.05,0.24,0.15,3.08,0.42,0.55,,,
+680,1.08,0.16,0.16,1.47,0.17,0.09,3.00,0.52,0.46,0.91,0.03,0.08
+690,0.81,0.13,0.15,0.93,0.10,0.03,2.92,0.60,0.36,,,
+700,0.57,0.11,0.14,0.54,0.05,0.01,2.81,0.64,0.39,0.83,0.06,0.09
+710,0.41,0.08,0.13,0.30,0.02,0.01,2.73,0.65,0.44,,,
