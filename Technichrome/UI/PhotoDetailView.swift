@@ -22,6 +22,10 @@ struct PhotoDetailView: View {
     @State private var loaded = false
     /// Bumped to decode the print again (after the Laboratory, which may have re-developed it).
     @State private var reloadToken = 0
+    #if DEBUG
+    @State private var measuring = false
+    @State private var measurementFiles: [URL] = []
+    #endif
 
     var body: some View {
         ZStack {
@@ -100,7 +104,13 @@ struct PhotoDetailView: View {
                 row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), record.exposureBias))
             }
             row("Baseline", String(format: "%+.2f EV (DNG)", record.baselineExposure))
-            if let version = record.decoderVersion { row("Decoder", "CIRAWFilter \(version)") }
+            if let version = record.decoderVersion {
+                let highlights = record.highlightRecovery.map { $0 ? "on" : "off" } ?? "decoder default"
+                row("Decoder", "CIRAWFilter \(version) · highlight recovery \(highlights)")
+            }
+            #if DEBUG
+            if record.hasRAW { measurementRow }
+            #endif
             row("Print", "\(record.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", record.printExposureEV)) EV · timed \(String(format: "%+.2f", record.printTimingEV)) EV")
         }
         .padding(14)
@@ -117,6 +127,38 @@ struct PhotoDetailView: View {
             Spacer()
         }
     }
+
+    #if DEBUG
+    /// Debug builds only: the decode measurement of docs/HARDWARE_CHECKLIST.md (DevelopService.writeLinearMeasurements).
+    private var measurementRow: some View {
+        HStack(spacing: 12) {
+            Button(measuring ? "Writing linear decodes…" : "Write linear decodes (TIFF)") { writeMeasurements() }
+                .disabled(measuring)
+            if !measurementFiles.isEmpty {
+                ShareLink(items: measurementFiles) { Text("Share \(measurementFiles.count) files") }
+            }
+        }
+        .font(Theme.mono(11))
+        .tint(Theme.ivory)
+    }
+
+    private func writeMeasurements() {
+        guard let dev = model.develop else { return }
+        let store = model.store
+        let rec = record
+        measuring = true
+        Task {
+            do {
+                measurementFiles = try await Task.detached(priority: .userInitiated) {
+                    try dev.writeLinearMeasurements(for: rec, store: store)
+                }.value
+            } catch {
+                message = error.localizedDescription
+            }
+            measuring = false
+        }
+    }
+    #endif
 
     private var footer: some View {
         HStack(spacing: 10) {

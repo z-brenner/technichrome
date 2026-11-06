@@ -58,6 +58,16 @@ own signing team on the `Technichrome` target.
 9. **Load.** Ten captures in a row; a full-resolution develop of a 48 MP ProRAW if the phone has one.
    Note develop times and whether the phone gets hot or the app is killed for memory.
 
-10. **Report.** For anything that fails: the step number, the phone and iOS version, the *Camera on this
+10. **Decode measurement (debug build).** Import the two sample DNGs of the decode-fidelity review (the
+    iPhone XS Bayer DNG and the iPhone 12 Pro ProRAW), open each one's information panel and press *Write
+    linear decodes (TIFF)*. It writes CIRAWFilter's linear output at full resolution, noise reduction 0,
+    with lens correction on and off and highlight recovery on and off (settable from iOS 26 with an
+    Xcode 26 build; otherwise one decode, marked `hr-default`), as half-float TIFFs in extended linear sRGB
+    without the baseline exposure. Share them with the report: compared with the review's reference DNG
+    pipeline (corner falloff, colour error, clipped-area chroma, the shadow floor), they replace its
+    inferences about Apple's decoder with numbers. Note the decoder version and highlight-recovery line of
+    the panel.
+
+11. **Report.** For anything that fails: the step number, the phone and iOS version, the *Camera on this
     iPhone* section as shown, and the self-test line. For the look itself: a developed print, the DNG,
     and the Laboratory's exported parameters JSON.

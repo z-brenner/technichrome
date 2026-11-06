@@ -19,6 +19,8 @@ public struct DevelopedImage: @unchecked Sendable {
     public let baselineExposure: Double
     /// The CIRAWFilter decoder version used (nil for a display-referred original); stored in the record.
     public let decoderVersion: String?
+    /// Whether highlight recovery was on (nil: the decoder's default; see RAWDecodeInfo).
+    public let highlightRecovery: Bool?
 }
 
 /// A scene-linear source and what decoded it.
@@ -203,8 +205,46 @@ public final class DevelopService: @unchecked Sendable {
             throw DevelopError.renderFailed
         }
         try Self.writeJPEG(thumb, to: store.thumbnailURL(for: record), quality: 0.85)
-        return DevelopedImage(image: display, baselineExposure: baseline, decoderVersion: source.decode?.decoderVersion)
+        return DevelopedImage(image: display, baselineExposure: baseline, decoderVersion: source.decode?.decoderVersion,
+                              highlightRecovery: source.decode?.highlightRecovery)
     }
+
+    #if DEBUG
+    /// The decode measurement of docs/HARDWARE_CHECKLIST.md (debug builds only). CIRAWFilter's linear output for a
+    /// RAW photograph at full resolution, noise reduction 0, with lens correction and highlight recovery each on
+    /// and off, written as half-float TIFFs in extended linear sRGB with no baseline exposure applied, so they can
+    /// be compared with the reference DNG pipeline of the decode-fidelity review (corner falloff, colour error,
+    /// clipped-area chroma, the shadow floor). Where highlight recovery cannot be set (before iOS 26, or an older
+    /// SDK) the two highlight variants are one decode, written once. Each file is about 100 MB for 12 MP.
+    func writeLinearMeasurements(for record: PhotoRecord, store: PhotoStore) throws -> [URL] {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("linear-\(record.id.uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var written: [URL] = []
+        for lens in [true, false] {
+            for highlights in [true, false] {
+                var opts = RAWDeveloper.Options()
+                opts.colorNoiseReduction = 0
+                opts.luminanceNoiseReduction = 0
+                opts.lensCorrection = lens
+                opts.highlightRecovery = highlights
+                opts.decoderVersion = record.decoderVersion
+                let dev = try RAWDeveloper(url: store.originalURL(for: record), options: opts)
+                // A setting the filter does not offer gives the same decode both ways: written once.
+                if !highlights, dev.info.highlightRecovery == nil { continue }
+                if !lens, !dev.filter.isLensCorrectionSupported { continue }
+                guard let image = dev.linearImage else { throw RAWDeveloperError.unsupportedRAW }
+                let hr = dev.info.highlightRecovery.map { $0 ? "hr-on" : "hr-off" } ?? "hr-default"
+                let lc = dev.filter.isLensCorrectionSupported ? (lens ? "lens-on" : "lens-off") : "lens-unsupported"
+                let url = dir.appendingPathComponent("linear-\(lc)-\(hr)-decoder-\(dev.info.decoderVersion).tiff")
+                try developContext.writeTIFFRepresentation(of: image, to: url, format: .RGBAh,
+                                                           colorSpace: TechnichromeEngine.workingColorSpace)
+                written.append(url)
+            }
+        }
+        return written
+    }
+    #endif
 
     /// Decodes a JPEG at reduced size (ImageIO scales during decoding, so the full image is never unpacked).
     static func decodeDownscaled(_ url: URL, maxPixelSize: Int) -> CGImage? {

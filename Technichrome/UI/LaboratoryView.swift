@@ -375,7 +375,7 @@ struct LaboratoryView: View {
                 await MainActor.run {
                     var r = store.record(id: record.id) ?? record
                     r.parameters = p; r.printTimingEV = timing; r.isDeveloped = true; r.baselineExposure = result.baselineExposure
-                    r.decoderVersion = result.decoderVersion
+                    r.decoderVersion = result.decoderVersion; r.highlightRecovery = result.highlightRecovery
                     try? store.save(r)
                     busy = false
                     message = "Re-developed at full resolution."

@@ -205,6 +205,7 @@ struct DevelopView: View {
             updated.baselineExposure = result.baselineExposure
             updated.parameters = params
             updated.decoderVersion = result.decoderVersion     // pinned for re-develops (RAWDeveloper.configure)
+            updated.highlightRecovery = result.highlightRecovery
             try? store.save(updated)
             developed = true
             Haptics.success()

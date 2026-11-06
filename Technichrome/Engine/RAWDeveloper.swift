@@ -27,6 +27,9 @@ public struct RAWDecodeInfo: Sendable {
     public var orientation: CGImagePropertyOrientation
     /// The CIRAWFilter decoder version the image is decoded with (`CIRAWDecoderVersion.rawValue`).
     public var decoderVersion: String
+    /// Whether highlight recovery was on; nil where the app cannot set it (built without the iOS 26 SDK,
+    /// running before iOS 26, or a file the filter reports it unsupported for), i.e. the decoder's default.
+    public var highlightRecovery: Bool?
 }
 
 public enum RAWDeveloperError: Error, LocalizedError {
@@ -44,6 +47,11 @@ public final class RAWDeveloper {
         public var sharpness: Float = 0.0
         public var detail: Float = 0.0
         public var lensCorrection: Bool = true
+        /// Apple's highlight recovery, set explicitly where CIRAWFilter exposes it (iOS 26 and later) rather than
+        /// left at the decoder's default, which Apple does not document. On: the engine's shoulder should see
+        /// what the decoder can rebuild above a channel's clip. Whether it should stay on is measured on hardware
+        /// (docs/HARDWARE_CHECKLIST.md, "Decode measurement").
+        public var highlightRecovery: Bool = true
         /// 0 = full resolution, 0.25 = quick preview
         public var scaleFactor: Float = 1.0
         public var draftMode: Bool = false
@@ -113,12 +121,26 @@ public final class RAWDeveloper {
         if f.isSharpnessSupported { f.sharpnessAmount = options.sharpness }
         if f.isDetailSupported { f.detailAmount = options.detail }
         if f.isLensCorrectionSupported { f.isLensCorrectionEnabled = options.lensCorrection }
+        let highlightRecovery = setHighlightRecovery(f, options.highlightRecovery)
         f.scaleFactor = options.scaleFactor
         f.isDraftModeEnabled = options.draftMode
         f.orientation = orientation
 
         return RAWDecodeInfo(nativeSize: f.nativeSize, baselineExposure: baseline, cameraModel: model, orientation: orientation,
-                             decoderVersion: f.decoderVersion.rawValue)
+                             decoderVersion: f.decoderVersion.rawValue, highlightRecovery: highlightRecovery)
+    }
+
+    /// Sets highlight recovery where both the SDK and the running iOS have it, and returns the value now set;
+    /// nil means the decoder's own default applies. `isHighlightRecoveryEnabled` appeared in the iOS 26 SDK
+    /// (Swift 6.2, Xcode 26), so with an older SDK, which CI may use, this compiles to `nil`.
+    private static func setHighlightRecovery(_ f: CIRAWFilter, _ on: Bool) -> Bool? {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *), f.isHighlightRecoverySupported {
+            f.isHighlightRecoveryEnabled = on
+            return f.isHighlightRecoveryEnabled
+        }
+        #endif
+        return nil
     }
 
     /// Scene-linear image in the Core Image working space (extended linear sRGB when rendered with

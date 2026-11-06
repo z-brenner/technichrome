@@ -40,6 +40,9 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
     /// The CIRAWFilter decoder version the print was developed with (nil before the first develop, and for
     /// display-referred originals). A re-develop asks for the same one, so an iOS update does not change it.
     public var decoderVersion: String?
+    /// Whether CIRAWFilter's highlight recovery was on for the print (nil: the decoder's default, where the app
+    /// cannot set it).
+    public var highlightRecovery: Bool?
 
     public var originalFileName: String { originalFile ?? (rawKind == .none ? "original.heic" : "original.dng") }
     public var hasRAW: Bool { rawKind != .none }
@@ -75,6 +78,7 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
         isDeveloped = try c.decodeIfPresent(Bool.self, forKey: .isDeveloped) ?? false
         originalFile = try c.decodeIfPresent(String.self, forKey: .originalFile)
         decoderVersion = try c.decodeIfPresent(String.self, forKey: .decoderVersion)
+        highlightRecovery = try c.decodeIfPresent(Bool.self, forKey: .highlightRecovery)
     }
 }
 
