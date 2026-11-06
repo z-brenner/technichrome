@@ -36,6 +36,8 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     /// Print timing for the preview: measured about twice a second from the frames and smoothed, so the
     /// preview predicts the timed print rather than the untimed one.
     private(set) var previewTimingEV: Double = 0
+    /// A timing measurement is on the GPU (see startPreviewTimingMeasurement).
+    private var timingInFlight = false
     private var frameCounter = 0
     /// Set when a new frame, parameter or size requires a redraw; the view ticks at 30 fps regardless.
     private var dirty = true
@@ -109,8 +111,7 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
             frameCounter &+= 1
             if parameters.timingStrength > 0 {
                 if frameCounter % 12 == 1, systemPressure < .serious {
-                    let measured = measurePreviewTiming(of: image, engine: engine)
-                    previewTimingEV += 0.35 * (measured - previewTimingEV)   // settles within about a second
+                    startPreviewTimingMeasurement(of: image, engine: engine)
                 }
             } else {
                 previewTimingEV = 0
@@ -143,18 +144,51 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     }
 
     /// Print timing measured the way the develop step measures it: geometric-mean luminance after the engine's
-    /// fixed exposure, with the photographer's exposure compensation taken out. One 1×1 readback per call.
-    private func measurePreviewTiming(of image: CIImage, engine: TechnichromeEngine) -> Double {
-        let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: 0)
+    /// fixed exposure, with the photographer's exposure compensation taken out (a mean of logs at preview size;
+    /// downscaling first would bias the geometric mean).
+    ///
+    /// The 1×1 readback is asynchronous: the render is queued on the GPU here, waited for on a utility queue,
+    /// and the result reaches the main actor a frame or two later, which the smoothing absorbs. A synchronous
+    /// readback made the main thread wait for the GPU every 12 frames. One measurement at a time.
+    private func startPreviewTimingMeasurement(of image: CIImage, engine: TechnichromeEngine) {
+        guard !timingInFlight else { return }
+        let p = parameters
+        let bias = cameraBiasEV
         let average = CIFilter.areaAverage()
-        average.inputImage = engine.makeLogLuminance(from: image, exposureScale: scale)
+        average.inputImage = engine.makeLogLuminance(from: image, exposureScale: TechnichromeEngine.exposureScale(parameters: p, baselineEV: 0))
         average.extent = image.extent
-        guard let out = average.outputImage else { return previewTimingEV }
-        var pixel = [Float](repeating: 0, count: 4)
-        context.render(out, toBitmap: &pixel, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
-        guard pixel[0].isFinite else { return previewTimingEV }
-        return PrintTiming.exposureEV(geometricMeanLuminance: pow(2.0, Double(pixel[0])), target: parameters.timingTarget,
-                                      strength: parameters.timingStrength, limit: parameters.timingLimit, cameraBiasEV: cameraBiasEV)
+        guard let out = average.outputImage, !out.extent.isInfinite else { return }
+        let pixel = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+        pixel.initialize(repeating: .nan, count: 4)
+        let destination = CIRenderDestination(bitmapData: pixel, width: 1, height: 1, bytesPerRow: 16, format: .RGBAf)
+        // The working space itself, so the log values come back unconverted, negative ones included.
+        destination.colorSpace = TechnichromeEngine.workingColorSpace
+        let task: CIRenderTask
+        do {
+            task = try context.startTask(toRender: out, from: CGRect(origin: out.extent.origin, size: CGSize(width: 1, height: 1)),
+                                         to: destination, at: .zero)
+        } catch {
+            pixel.deallocate()
+            return
+        }
+        timingInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let logMean: Double = withExtendedLifetime(destination) {
+                (try? task.waitUntilCompleted()) != nil ? Double(pixel[0]) : .nan
+            }
+            pixel.deallocate()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.finishPreviewTiming(logMean: logMean, parameters: p, cameraBiasEV: bias) }
+            }
+        }
+    }
+
+    private func finishPreviewTiming(logMean: Double, parameters p: EngineParameters, cameraBiasEV bias: Double) {
+        timingInFlight = false
+        guard logMean.isFinite, parameters.timingStrength > 0 else { return }
+        let measured = PrintTiming.exposureEV(geometricMeanLuminance: pow(2.0, logMean), target: p.timingTarget,
+                                              strength: p.timingStrength, limit: p.timingLimit, cameraBiasEV: bias)
+        previewTimingEV += 0.35 * (measured - previewTimingEV)   // settles within about a second
     }
 
     /// Maps a tap in view points to AVFoundation device coordinates (0…1, landscape sensor frame).
