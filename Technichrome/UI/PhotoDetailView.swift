@@ -19,6 +19,9 @@ struct PhotoDetailView: View {
     @State private var message: String?
     @State private var showsInfo = false
     @State private var showsLab = false
+    @State private var loaded = false
+    /// Bumped to decode the print again (after the Laboratory, which may have re-developed it).
+    @State private var reloadToken = 0
 
     var body: some View {
         ZStack {
@@ -38,7 +41,7 @@ struct PhotoDetailView: View {
                                 .onChanged { v in zoom = max(1, min(5, lastZoom * v.magnification)) }
                                 .onEnded { _ in lastZoom = zoom })
                             .onTapGesture(count: 2) { withAnimation(.spring(response: 0.3)) { zoom = 1; lastZoom = 1 } }
-                    } else {
+                    } else if loaded {
                         TCLabel("undeveloped", size: 11)
                     }
                 }
@@ -51,7 +54,7 @@ struct PhotoDetailView: View {
                 footer
             }
         }
-        .task { load() }
+        .task(id: reloadToken) { await load() }
         .confirmationDialog("Delete this photograph and its RAW file?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 model.store.delete(record)
@@ -63,7 +66,7 @@ struct PhotoDetailView: View {
         } message: { Text(message ?? "") }
         // Presented from this cover, not from RootView, which cannot present while a cover is up (see DevelopView).
         // The print is reloaded afterwards, since the Laboratory may have re-developed it.
-        .sheet(isPresented: $showsLab, onDismiss: { load() }) {
+        .sheet(isPresented: $showsLab, onDismiss: { reloadToken += 1 }) {
             LaboratoryView(record: model.store.record(id: record.id) ?? record)
                 .environment(model)
                 .presentationDetents([.large])
@@ -151,9 +154,21 @@ struct PhotoDetailView: View {
         return items
     }
 
-    private func load() {
-        image = UIImage(contentsOfFile: model.store.developedURL(for: record).path)
-        let a = model.store.appleURL(for: record)
-        if FileManager.default.fileExists(atPath: a.path) { appleImage = UIImage(contentsOfFile: a.path) }
+    /// Decodes the print and Apple's rendering off the main thread, at a bounded size. `UIImage(contentsOfFile:)`
+    /// decoded them in full on the main thread when first drawn: a 48 MP print is a 195 MB bitmap. 4096 px keeps
+    /// the zoom sharp to about 3.5× on a phone screen; the companion is only ever shown at screen size.
+    private func load() async {
+        let printURL = model.store.developedURL(for: record)
+        let appleURL = model.store.appleURL(for: record)
+        let (developed, companion) = await Task.detached(priority: .userInitiated) { () -> (CGImage?, CGImage?) in
+            let developed = DevelopService.decodeDownscaled(printURL, maxPixelSize: 4096)
+            let companion = FileManager.default.fileExists(atPath: appleURL.path)
+                ? DevelopService.decodeDownscaled(appleURL, maxPixelSize: 2048) : nil
+            return (developed, companion)
+        }.value
+        if Task.isCancelled { return }
+        image = developed.map { UIImage(cgImage: $0) }
+        appleImage = companion.map { UIImage(cgImage: $0) }
+        loaded = true
     }
 }

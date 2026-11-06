@@ -186,9 +186,12 @@ struct DevelopView: View {
             try? await Task.sleep(for: .milliseconds(520))
             stage = s
         }
+        // Apple's rendering, decoded off the main thread at screen size (it is only compared on screen; at full
+        // size a 48 MP companion would be a 195 MB bitmap decoded on the main thread when first drawn).
         let appleURL = store.appleURL(for: rec)
-        if FileManager.default.fileExists(atPath: appleURL.path) {
-            appleImage = UIImage(contentsOfFile: appleURL.path)
+        if FileManager.default.fileExists(atPath: appleURL.path),
+           let companion = await Task.detached(priority: .utility, operation: { DevelopService.decodeDownscaled(appleURL, maxPixelSize: 2048) }).value {
+            appleImage = UIImage(cgImage: companion)
         }
         do {
             let result = try await full.value
