@@ -57,6 +57,9 @@ struct SettingsView: View {
                     LabeledContent("Engine", value: model.engine == nil ? "unavailable" : "Core Image + Metal kernels")
                     LabeledContent("Look", value: model.parameters.name)
                     LabeledContent("Photographs", value: "\(model.store.records.count)")
+                    // The CIRAWFilter decoder of the newest RAW develop (each record keeps its own; see the photo info).
+                    LabeledContent("RAW decoder", value: model.store.records.first(where: { $0.decoderVersion != nil })?.decoderVersion
+                                   ?? "no RAW developed yet")
                     Button(testing ? "Testing the engine…" : "Run engine self-test") { runSelfTest() }
                         .disabled(testing || model.engine == nil)
                     if let selfTest {

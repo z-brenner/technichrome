@@ -37,6 +37,9 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
     /// File name of the original inside the photograph's folder when it is not the default (imports keep
     /// their container type: original.jpg, original.tiff, …).
     public var originalFile: String?
+    /// The CIRAWFilter decoder version the print was developed with (nil before the first develop, and for
+    /// display-referred originals). A re-develop asks for the same one, so an iOS update does not change it.
+    public var decoderVersion: String?
 
     public var originalFileName: String { originalFile ?? (rawKind == .none ? "original.heic" : "original.dng") }
     public var hasRAW: Bool { rawKind != .none }
@@ -71,6 +74,7 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
         parameters = try c.decodeIfPresent(EngineParameters.self, forKey: .parameters)
         isDeveloped = try c.decodeIfPresent(Bool.self, forKey: .isDeveloped) ?? false
         originalFile = try c.decodeIfPresent(String.self, forKey: .originalFile)
+        decoderVersion = try c.decodeIfPresent(String.self, forKey: .decoderVersion)
     }
 }
 

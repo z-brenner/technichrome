@@ -100,6 +100,7 @@ struct PhotoDetailView: View {
                 row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), record.exposureBias))
             }
             row("Baseline", String(format: "%+.2f EV (DNG)", record.baselineExposure))
+            if let version = record.decoderVersion { row("Decoder", "CIRAWFilter \(version)") }
             row("Print", "\(record.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", record.printExposureEV)) EV · timed \(String(format: "%+.2f", record.printTimingEV)) EV")
         }
         .padding(14)

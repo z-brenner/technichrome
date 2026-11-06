@@ -25,6 +25,8 @@ public struct RAWDecodeInfo: Sendable {
     public var baselineExposure: Double
     public var cameraModel: String
     public var orientation: CGImagePropertyOrientation
+    /// The CIRAWFilter decoder version the image is decoded with (`CIRAWDecoderVersion.rawValue`).
+    public var decoderVersion: String
 }
 
 public enum RAWDeveloperError: Error, LocalizedError {
@@ -45,6 +47,9 @@ public final class RAWDeveloper {
         /// 0 = full resolution, 0.25 = quick preview
         public var scaleFactor: Float = 1.0
         public var draftMode: Bool = false
+        /// The decoder version to decode with (`CIRAWDecoderVersion.rawValue`), if this iOS still offers it;
+        /// nil, or a version no longer offered, means the newest.
+        public var decoderVersion: String?
         public init() {}
 
         /// Noise reduction that rises with ISO: RAW noise in the shadows is amplified by the print's
@@ -75,6 +80,15 @@ public final class RAWDeveloper {
     }
 
     private static func configure(_ f: CIRAWFilter, options: Options, url: URL?) -> RAWDecodeInfo {
+        // The decoder version first, before anything is read or set. A new filter uses the newest version on this
+        // iOS, and an update can change Apple's demosaic or noise reduction, and so the print of a preserved
+        // original developed again with the same parameters. A re-develop asks for the version the photograph
+        // was developed with, if it is still offered: Apple warns that one outside `supportedDecoderVersions`
+        // gives a nil image, so otherwise the newest stays (and is what the record then says).
+        if let wanted = options.decoderVersion {
+            let version = CIRAWDecoderVersion(rawValue: wanted)
+            if f.supportedDecoderVersions.contains(version) { f.decoderVersion = version }
+        }
         // Read the decoder's defaults *before* overriding them: baselineExposure defaults to the DNG tag.
         let baseline = Double(f.baselineExposure)
         let props = f.properties
@@ -103,7 +117,8 @@ public final class RAWDeveloper {
         f.isDraftModeEnabled = options.draftMode
         f.orientation = orientation
 
-        return RAWDecodeInfo(nativeSize: f.nativeSize, baselineExposure: baseline, cameraModel: model, orientation: orientation)
+        return RAWDecodeInfo(nativeSize: f.nativeSize, baselineExposure: baseline, cameraModel: model, orientation: orientation,
+                             decoderVersion: f.decoderVersion.rawValue)
     }
 
     /// Scene-linear image in the Core Image working space (extended linear sRGB when rendered with

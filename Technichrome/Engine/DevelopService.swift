@@ -17,6 +17,17 @@ import UniformTypeIdentifiers
 public struct DevelopedImage: @unchecked Sendable {
     public let image: CGImage           // display-sized (long edge ≈ 1500 px), Display P3
     public let baselineExposure: Double
+    /// The CIRAWFilter decoder version used (nil for a display-referred original); stored in the record.
+    public let decoderVersion: String?
+}
+
+/// A scene-linear source and what decoded it.
+public struct LinearSource: @unchecked Sendable {
+    public let image: CIImage
+    /// DNG BaselineExposure (stops), 0 for a display-referred original.
+    public let baselineEV: Double
+    /// How CIRAWFilter decoded it; nil for a display-referred original.
+    public let decode: RAWDecodeInfo?
 }
 
 public enum DevelopError: Error, LocalizedError {
@@ -67,16 +78,25 @@ public final class DevelopService: @unchecked Sendable {
     /// `maxLongEdge` lowers the scale further for large originals.
     public func linearSource(for record: PhotoRecord, store: PhotoStore, scaleFactor: Float = 1.0, draft: Bool = false,
                              maxLongEdge: CGFloat? = nil) throws -> (CIImage, Double) {
+        let source = try decodeLinear(for: record, store: store, scaleFactor: scaleFactor, draft: draft, maxLongEdge: maxLongEdge)
+        return (source.image, source.baselineEV)
+    }
+
+    /// `linearSource`, with what decoded it. A RAW is decoded with the decoder version its record was developed
+    /// with, when this iOS still offers it (see RAWDeveloper.configure).
+    public func decodeLinear(for record: PhotoRecord, store: PhotoStore, scaleFactor: Float = 1.0, draft: Bool = false,
+                             maxLongEdge: CGFloat? = nil) throws -> LinearSource {
         let url = store.originalURL(for: record)
         if record.hasRAW {
             var opts = RAWDeveloper.Options.adaptive(iso: record.iso)
             opts.scaleFactor = scaleFactor
             opts.draftMode = draft
+            opts.decoderVersion = record.decoderVersion
             let dev = try RAWDeveloper(url: url, options: opts)
             let native = max(dev.info.nativeSize.width, dev.info.nativeSize.height)
             if let maxLongEdge, native > 0 { dev.filter.scaleFactor = min(scaleFactor, Float(maxLongEdge / native)) }
             guard let img = dev.linearImage else { throw RAWDeveloperError.unsupportedRAW }
-            return (img, dev.info.baselineExposure)
+            return LinearSource(image: img, baselineEV: dev.info.baselineExposure, decode: dev.info)
         } else {
             guard var img = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else { throw RAWDeveloperError.unsupportedRAW }
             var scale = CGFloat(scaleFactor)
@@ -85,7 +105,7 @@ public final class DevelopService: @unchecked Sendable {
             if scale < 1 {
                 img = img.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
             }
-            return (img, 0)
+            return LinearSource(image: img, baselineEV: 0, decode: nil)
         }
     }
 
@@ -162,7 +182,8 @@ public final class DevelopService: @unchecked Sendable {
     /// image are then decoded from the file at reduced size by ImageIO.
     @discardableResult
     public func developToDisk(record: PhotoRecord, store: PhotoStore, parameters: EngineParameters, extraEV: Double) throws -> DevelopedImage {
-        let (linear, baseline) = try linearSource(for: record, store: store)
+        let source = try decodeLinear(for: record, store: store)
+        let (linear, baseline) = (source.image, source.baselineEV)
         let longEdge = Double(max(linear.extent.width, linear.extent.height))
         let provenance = Self.printMetadata(from: store.originalURL(for: record))
         let print = makePrint(linear: linear, baselineEV: baseline, parameters: parameters, extraEV: extraEV, fullLongEdge: longEdge)
@@ -182,7 +203,7 @@ public final class DevelopService: @unchecked Sendable {
             throw DevelopError.renderFailed
         }
         try Self.writeJPEG(thumb, to: store.thumbnailURL(for: record), quality: 0.85)
-        return DevelopedImage(image: display, baselineExposure: baseline)
+        return DevelopedImage(image: display, baselineExposure: baseline, decoderVersion: source.decode?.decoderVersion)
     }
 
     /// Decodes a JPEG at reduced size (ImageIO scales during decoding, so the full image is never unpacked).
