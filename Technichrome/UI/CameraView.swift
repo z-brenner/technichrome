@@ -38,7 +38,10 @@ struct CameraView: View {
             renderer?.releaseFrame()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { model.camera.start() } else if phase == .background { model.camera.stop() }
+            if phase == .active { if !cameraCovered { model.camera.start() } } else if phase == .background { model.camera.stop() }
+        }
+        .onChange(of: cameraCovered) { _, covered in
+            if covered { model.camera.stop() } else if scenePhase == .active { model.camera.start() }
         }
         .onChange(of: model.parameters) { _, p in renderer?.parameters = p }
         .onChange(of: model.camera.exposureBias) { _, ev in renderer?.cameraBiasEV = Double(ev) }
@@ -101,10 +104,17 @@ struct CameraView: View {
         }
     }
 
+    /// The camera runs only while it is the visible surface. Under the develop screen or a sheet the view may
+    /// stay in the hierarchy (SwiftUI does not promise `onDisappear` there), and the sensor, the ISP and the
+    /// preview's GPU work would run through the full-resolution develop for nothing.
+    private var cameraCovered: Bool {
+        model.developing != nil || model.showsLaboratory || model.showsSettings
+    }
+
     /// Volume buttons and the Camera Control button photograph only while the camera is the active surface;
     /// under the develop screen or a sheet they keep their system behaviour.
     private var hardwareShutterEnabled: Bool {
-        model.camera.canCapture && model.developing == nil && !model.showsLaboratory && !model.showsSettings
+        model.camera.canCapture && !cameraCovered
     }
 
     /// What keeps the camera from photographing, when something does: an interruption (the session resumes by
@@ -313,7 +323,7 @@ struct CameraView: View {
         renderer?.cameraBiasEV = Double(model.camera.exposureBias)
         renderer?.systemPressure = model.camera.pressure
         renderer?.showsLook = showsLook           // this view's toggle starts afresh; the renderer outlives it
-        model.camera.start()
+        if !cameraCovered { model.camera.start() }
     }
 
     private func capture() {
