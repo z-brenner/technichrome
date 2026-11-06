@@ -83,10 +83,18 @@ public enum Spectral {
     public static let wavelengths: [Double] = stride(from: 360.0, through: 830.0, by: 5.0).map { $0 }
     public static var sampleCount: Int { wavelengths.count }
 
-    /// CIE 1931 2° standard observer (x̄, ȳ, z̄) on the wavelength grid: the CIE's table, CIE 2019, "Colour-matching
-    /// functions of CIE 1931 standard colorimetric observer", DOI 10.25039/CIE.DS.xvudnb9b (from CIE 018:2019, Table 6;
-    /// CC BY-SA 4.0), published at 1 nm from 360 to 830 nm; these are its rows at every 5 nm, digits as published, the
-    /// same rows as tools/colorscience/tcspectral.py. Equal-energy white integrates to xy (0.33331, 0.33329).
+    // BEGIN DATA: CIE 1931 2° colour-matching functions ===========================================
+    // Source: CIE 2019, "Colour-matching functions of CIE 1931 standard colorimetric observer", International
+    //   Commission on Illumination (CIE), Vienna. DOI 10.25039/CIE.DS.xvudnb9b,
+    //   https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer (file CIE_xyz_1931_2deg.csv;
+    //   original source CIE 018:2019, The Basis of Physical Photometry, Table 6).
+    // Licence: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0),
+    //   https://creativecommons.org/licenses/by-sa/4.0/
+    // Changes: values unchanged, sampled every 5 nm. The CIE tabulates 360-830 nm at 1 nm; this block keeps its rows at
+    //   360, 365, ..., 830 nm (95 rows), digits as published (trailing zeros dropped).
+    /// CIE 1931 2° standard observer (x̄, ȳ, z̄) on the wavelength grid, 360–830 nm every 5 nm: the CIE's table (see
+    /// the notice above), the same rows as tools/colorscience/tcspectral.py. Equal-energy white integrates to
+    /// xy (0.33331, 0.33329).
     public static let cmfTable: [SIMD3<Double>] = [
         SIMD3(0.0001299, 0.000003917, 0.0006061),  // 360
         SIMD3(0.0002321, 0.000006965, 0.001086),  // 365
@@ -184,6 +192,7 @@ public enum Spectral {
         SIMD3(0.000001776509, 0.00000064153, 0.0),  // 825
         SIMD3(0.000001251141, 0.00000045181, 0.0),  // 830
     ]
+    // END DATA: CIE 1931 2° colour-matching functions =============================================
 
     /// Relative spectral radiance of a Planckian radiator at temperature `kelvin`, peak-normalised,
     /// on the wavelength grid.

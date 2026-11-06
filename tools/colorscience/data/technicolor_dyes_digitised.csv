@@ -1,6 +1,21 @@
-# Technicolor No. IV (three-strip) imbibition dyes, absorbance spectra digitised from published figures. ESTIMATES:
-# read by colour-mask digitisation of the published JPEG plots (axes located from the gridlines), about +-0.02 absorbance
-# on the calibrated plot. Used by fit_dyes.py, which fits the engine's lobe model to them (tcengine.DYE_SETS).
+# NOTICE ================================================================================================
+# What this is: absorbance spectra of Technicolor No. IV (three-strip) imbibition dyes, digitised from published
+#   figures: read from the published JPEG images by colour masking (curve colour isolated, axes located from the
+#   gridlines), not supplied by the authors. ESTIMATES, about +-0.02 absorbance on the calibrated plot.
+# Sources and figure credits:
+#   NSMM12593_*  FilmColors (University of Zurich, ERC Advanced Grant FilmColors), Timeline of Historical Film Colors,
+#                "Technicolor No. IV: Three-strip", https://filmcolors.org/timeline-entry/1301/ ; figure credit
+#                Giorgio Trumpy: https://filmcolors.org/wp-content/uploads/2018/05/measuredODs_MSI_NSMM_12593_Technicolor_IV_small.jpg
+#   NSMM12484_*  same page; figure credit Giorgio Trumpy:
+#                https://filmcolors.org/wp-content/uploads/2018/05/extractedODs_MSI_NSMM_12484_Technicolor_IV_small.jpg
+#   SAMSON1949_* same page; figure credit Giorgio Trumpy:
+#                https://filmcolors.org/wp-content/uploads/2018/05/extractedODs_MSI_SamsonAndDelilah_Technicolor_IV_small.jpg
+#   FIG16_*      B. Flueckiger, D. Pfluger, G. Trumpy et al., Investigation of Film Material-Scanner Interaction
+#                (2018), sec. 2.8.2, Fig. 16, pp. 21-22:
+#                https://diastor.ch/wp-content/uploads/2018/02/flueckigeretal_investigationfilmmaterialscannerinteraction_2018_v_1-1b.pdf
+# The figures remain their authors'; this file holds only numbers read from them, for fit_dyes.py, with the credit above.
+# =======================================================================================================
+# Used by fit_dyes.py, which fits the engine's lobe model to them (tcengine.DYE_SETS). Per column:
 # NSMM12593_*: FilmColors (University of Zurich, ERC Advanced Grant FilmColors; figure credit Giorgio Trumpy), Timeline of
 #   Historical Film Colors, "Technicolor No. IV: Three-strip", https://filmcolors.org/timeline-entry/1301/ : National
 #   Science and Media Museum, Bradford, NSMM 12593 (a leader with Y, C, M letters; date and production not stated),

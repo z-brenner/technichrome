@@ -24,10 +24,18 @@ LAMBDA = np.arange(360.0, 830.0 + 1e-6, 5.0)  # 95 samples
 # ----------------------------------------------------------------------------
 # Colour-matching functions: the CIE 1931 2° standard observer, tabulated
 # ----------------------------------------------------------------------------
-# CIE 2019, "Colour-matching functions of CIE 1931 standard colorimetric observer", International Commission on
-# Illumination (CIE), Vienna, DOI 10.25039/CIE.DS.xvudnb9b (from CIE 018:2019, Table 6; CC BY-SA 4.0). The CIE
-# publishes it at 1 nm from 360 to 830 nm; these are its rows at every 5 nm, digits as published. Equal-energy white
-# integrates to xy (0.33331, 0.33329). SpectralMath.swift and web/src/engine/spectral.ts carry the same rows.
+# The engine integrates against the CIE's own table (equal-energy white comes out at xy (0.33331, 0.33329));
+# SpectralMath.swift and web/src/engine/spectral.ts carry the same rows in the same kind of block.
+
+# BEGIN DATA: CIE 1931 2° colour-matching functions ================================================
+# Source: CIE 2019, "Colour-matching functions of CIE 1931 standard colorimetric observer", International
+#   Commission on Illumination (CIE), Vienna. DOI 10.25039/CIE.DS.xvudnb9b,
+#   https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer (file CIE_xyz_1931_2deg.csv;
+#   original source CIE 018:2019, The Basis of Physical Photometry, Table 6).
+# Licence: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0),
+#   https://creativecommons.org/licenses/by-sa/4.0/
+# Changes: values unchanged, sampled every 5 nm. The CIE tabulates 360-830 nm at 1 nm; this block keeps its rows at
+#   360, 365, ..., 830 nm (95 rows), digits as published (trailing zeros dropped).
 CIE1931_2DEG = (   # (x̄, ȳ, z̄) at 360, 365, …, 830 nm
     (0.0001299, 0.000003917, 0.0006061),  # 360
     (0.0002321, 0.000006965, 0.001086),  # 365
@@ -125,6 +133,7 @@ CIE1931_2DEG = (   # (x̄, ȳ, z̄) at 360, 365, …, 830 nm
     (0.000001776509, 0.00000064153, 0.0),  # 825
     (0.000001251141, 0.00000045181, 0.0),  # 830
 )
+# END DATA: CIE 1931 2° colour-matching functions ==================================================
 
 CMF = np.array(CIE1931_2DEG, dtype=np.float64)  # (N, 3)
 assert CMF.shape == (len(LAMBDA), 3)
