@@ -18,6 +18,7 @@ struct PhotoDetailView: View {
     @State private var confirmDelete = false
     @State private var message: String?
     @State private var showsInfo = false
+    @State private var showsLab = false
 
     var body: some View {
         ZStack {
@@ -60,6 +61,13 @@ struct PhotoDetailView: View {
         .alert("Technichrome", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("OK") {}
         } message: { Text(message ?? "") }
+        // Presented from this cover, not from RootView, which cannot present while a cover is up (see DevelopView).
+        // The print is reloaded afterwards, since the Laboratory may have re-developed it.
+        .sheet(isPresented: $showsLab, onDismiss: { load() }) {
+            LaboratoryView(record: model.store.record(id: record.id) ?? record)
+                .environment(model)
+                .presentationDetents([.large])
+        }
     }
 
     private var header: some View {
@@ -127,10 +135,7 @@ struct PhotoDetailView: View {
                     .overlay(Capsule().strokeBorder(Theme.ivoryFaint, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            PillButton(title: "Lab") {
-                model.selectedPhoto = record
-                model.showsLaboratory = true
-            }
+            PillButton(title: "Lab") { showsLab = true }
             PillButton(title: "Delete") { confirmDelete = true }
         }
         .padding(.bottom, 28)

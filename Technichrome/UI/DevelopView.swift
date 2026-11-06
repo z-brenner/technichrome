@@ -46,6 +46,7 @@ struct DevelopView: View {
     @State private var saved = false
     @State private var comparing = false
     @State private var appleImage: UIImage?
+    @State private var showsLab = false
 
     var body: some View {
         ZStack {
@@ -65,6 +66,14 @@ struct DevelopView: View {
         .alert("Could not save to Photos", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
             Button("OK") {}
         } message: { Text(saveError ?? "") }
+        // Presented from this cover, not from RootView: RootView is already presenting the cover and UIKit lets a
+        // view controller present one modal at a time, so a sheet requested there is dropped.
+        .sheet(isPresented: $showsLab) {
+            // The stored record, which carries the print timing and parameters this develop wrote.
+            LaboratoryView(record: model.store.record(id: record.id) ?? record)
+                .environment(model)
+                .presentationDetents([.large])
+        }
     }
 
     private var header: some View {
@@ -129,10 +138,7 @@ struct DevelopView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                PillButton(title: "Lab") {
-                    model.selectedPhoto = record
-                    model.showsLaboratory = true
-                }
+                PillButton(title: "Lab") { showsLab = true }
                 .disabled(!developed)
                 .opacity(developed ? 1 : 0.4)
             }
