@@ -4,7 +4,7 @@ tcengine.py — reference implementation of the Technichrome "imbibition model".
 Pipeline (per pixel, scene-linear sRGB-primaries RGB in, display-linear RGB out):
 
   1. exposure            E  = rgb * 2^ev                                 (scene-linear)
-  2. three-strip camera  S  = M_sep @ E                                   (separation exposures, white = 1)
+  2. three-strip camera  S  = M_sep @ E                                   (separation exposures, white = 1, floored at 1e-6)
   3. negatives           Dn = hd_curve(log10 S)                           (silver density, three B&W negatives)
   4. matrices + dyes     Dd = dye_curve(log10(10^-Dn))                    (dye density transferred per matrix)
   5. key image           Dk = key_curve(log10(10^-Dn_green)) * key        (silver positive from the green record)
@@ -283,12 +283,22 @@ class Engine:
         return rgb
 
     # --- LUT ---------------------------------------------------------------------------------
-    def build_lut(self, n):
+    def lut_node_densities(self, n):
+        """Absolute dye densities at the nodes of an n³ cube, (n, n, n, 3) indexed [c, m, y]."""
         g = np.linspace(0.0, 1.0, n)
         c, m, y = np.meshgrid(g, g, g, indexing='ij')
-        dens = np.stack([c * self.p.dye_dmax[0], m * self.p.dye_dmax[1], y * self.p.dye_dmax[2]], axis=-1)
-        rgb = self.display_linear_from_densities(dens)
-        return soft_clip_gamut(rgb)  # (n, n, n, 3), indexed [c, m, y]
+        return np.stack([c * self.p.dye_dmax[0], m * self.p.dye_dmax[1], y * self.p.dye_dmax[2]], axis=-1)
+
+    def build_lut(self, n):
+        """The cube, factorised per dye: 10^-(Σ d_i a_i(λ) + Dmin) = T_c(λ) T_m(λ) T_y(λ) 10^-Dmin, so three
+        tables of n × wavelengths transmittances replace a power per entry and wavelength (LUTBuilder.swift and
+        printModel.ts bake the same way). Equal at every node to soft_clip_gamut(display_linear_from_densities(d)),
+        which check_prototype.py asserts."""
+        g = np.linspace(0.0, 1.0, n)
+        T = [10.0 ** (-np.outer(g * self.p.dye_dmax[i], self.A[i])) for i in range(3)]   # (n, wavelengths) per dye
+        w = (self.P * 10.0 ** (-self.p.print_dmin))[:, None] * S.CMF * self.white_scale   # lamp · base · observer
+        xyz = np.einsum('cl,ml,yl,lk->cmyk', T[0], T[1], T[2], w, optimize=True)
+        return soft_clip_gamut(S.apply_matrix(self.xyz_to_display, xyz))  # (n, n, n, 3), indexed [c, m, y]
 
     def lut_lookup(self, norm_dens):
         """Trilinear lookup, norm_dens in [0,1]^3 (..., 3)."""
@@ -339,9 +349,13 @@ class Engine:
 
     # --- per-pixel analytic part ---------------------------------------------------------
     def densities(self, rgb_linear):
-        """Scene-linear sRGB-primaries RGB → (dye densities normalised to [0,1] (...,3), key density (...))."""
+        """Scene-linear sRGB-primaries RGB → (dye densities normalised to [0,1] (...,3), key density (...)).
+
+        The separation matrix applies to the scene as it is: a negative component only means the colour lies
+        outside sRGB (a wide-gamut RAW colour), not that it is impossible. The record exposures, which cannot be
+        negative, are floored before the log; clamping each scene channel first would clip the colour to sRGB."""
         p = self.p
-        E = np.maximum(rgb_linear, 0.0) * (2.0 ** p.exposure_ev)
+        E = np.asarray(rgb_linear, dtype=np.float64) * (2.0 ** p.exposure_ev)
         Ssep = S.apply_matrix(self.M_sep, E)
         log_s = np.log10(np.maximum(Ssep, 1e-6))
         Dn = self.neg.density(log_s)

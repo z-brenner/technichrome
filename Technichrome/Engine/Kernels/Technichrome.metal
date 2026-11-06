@@ -30,9 +30,12 @@ static inline float tc_curve(float logE, float a, float logE0, float dMin, float
     return dMin + span * g;
 }
 
+/// The scene plus the halation glow, times the exposure. The scene is not clamped: a negative component is a
+/// colour outside sRGB (wide-gamut RAW), and the separation applies to it as it is; the record exposures are
+/// floored before the log (see ReferencePipeline.densities). The glow, a highlight excess, is clamped.
 static inline float3 tc_scene_exposure(float3 src, float3 glow, float bloomAmount, float exposureScale)
 {
-    float3 e = max(src, 0.0f) + bloomAmount * max(glow, 0.0f);
+    float3 e = src + bloomAmount * max(glow, 0.0f);
     return e * exposureScale;
 }
 
@@ -49,12 +52,13 @@ namespace coreimage {
     /// Scene-linear RGB (+ glow) → normalised dye densities. RGB = (cyan, magenta, yellow) in [0,1].
     ///   sepR/sepG/sepB : rows of the separation matrix (red, green, blue record)
     ///   neg            : (a, logE0, dMin, span) of the negative curve;  negShape: (xHalf, nu)
-    ///   mat            : (a, logE0, xHalf, nu) of the matrix curve;  dyeDMax, dyeGain, dyeLight (log10 units) per dye
+    ///   matA           : a of each dye's matrix curve (it depends on that dye's D max)
+    ///   mat            : (logE0, xHalf, nu) of the matrix curves, shared;  dyeDMax, dyeGain, dyeLight (log10 units) per dye
     ///   dyeMask        : 1 = dye transferred, 0 = matrix withheld (used by the develop reveal)
     float4 tc_separate(sample_t src, sample_t glow, float bloomAmount, float exposureScale,
                        float3 sepR, float3 sepG, float3 sepB,
                        float4 neg, float2 negShape,
-                       float4 mat, float3 dyeDMax, float3 dyeGain, float3 dyeLight, float3 dyeMask)
+                       float3 matA, float3 mat, float3 dyeDMax, float3 dyeGain, float3 dyeLight, float3 dyeMask)
     {
         float3 e = tc_scene_exposure(src.rgb, glow.rgb, bloomAmount, exposureScale);
         float3 s = float3(dot(sepR, e), dot(sepG, e), dot(sepB, e));
@@ -65,9 +69,9 @@ namespace coreimage {
         dn.z = tc_curve(logS.z, neg.x, neg.y, neg.z, neg.w, negShape.x, negShape.y);
         float3 logPrint = -dn + dyeLight;
         float3 dye;
-        dye.x = tc_curve(logPrint.x, mat.x, mat.y, 0.0f, dyeDMax.x, mat.z, mat.w) * dyeGain.x / dyeDMax.x;
-        dye.y = tc_curve(logPrint.y, mat.x, mat.y, 0.0f, dyeDMax.y, mat.z, mat.w) * dyeGain.y / dyeDMax.y;
-        dye.z = tc_curve(logPrint.z, mat.x, mat.y, 0.0f, dyeDMax.z, mat.z, mat.w) * dyeGain.z / dyeDMax.z;
+        dye.x = tc_curve(logPrint.x, matA.x, mat.x, 0.0f, dyeDMax.x, mat.y, mat.z) * dyeGain.x / dyeDMax.x;
+        dye.y = tc_curve(logPrint.y, matA.y, mat.x, 0.0f, dyeDMax.y, mat.y, mat.z) * dyeGain.y / dyeDMax.y;
+        dye.z = tc_curve(logPrint.z, matA.z, mat.x, 0.0f, dyeDMax.z, mat.y, mat.z) * dyeGain.z / dyeDMax.z;
         dye = saturate(dye) * dyeMask;
         return float4(dye, 1.0f);
     }

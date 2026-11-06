@@ -53,11 +53,12 @@ vec3 sceneLinear(sampler2D src, vec2 uv, int encoded, float exposureScale) {
 vec3 glowAt(sampler2D glow, ivec2 position, vec2 fullSize) {
   return max(texture(glow, (vec2(position) + 0.5) / fullSize).rgb, vec3(0.0));
 }
-// tc_scene_exposure: the scene plus the glow, times the exposure.
+// tc_scene_exposure: the scene plus the glow, times the exposure. The scene is not clamped (the separation applies to
+// a colour outside sRGB as it is; the records are floored before the log); the glow is.
 vec3 sceneExposure(sampler2D src, vec2 uv, int encoded, float exposureScale, sampler2D glow, float bloomAmount, ivec2 position, vec2 fullSize) {
   vec3 s = texture(src, uv).rgb;
   if (encoded == 1) s = srgbDecode(s);
-  vec3 e = max(s, vec3(0.0));
+  vec3 e = s;
   if (bloomAmount > 0.0) e += bloomAmount * glowAt(glow, position, fullSize);
   return e * exposureScale;
 }
@@ -87,7 +88,8 @@ uniform float uExposureScale;
 uniform vec3 uSepR, uSepG, uSepB;
 uniform vec4 uNeg;        // a, logE0, dMin, span
 uniform vec2 uNegShape;   // xHalf, nu
-uniform vec4 uMat;        // a, logE0, xHalf, nu
+uniform vec3 uMatA;       // a of each dye's matrix curve (it depends on that dye's D max)
+uniform vec3 uMat;        // logE0, xHalf, nu, shared by the three matrix curves
 uniform vec3 uDyeDMax, uDyeGain, uDyeLight, uDyeMask;
 uniform sampler2D uGlow;     // halation: the glow field of the whole image (unused when uBloomAmount is 0)
 uniform float uBloomAmount;
@@ -105,9 +107,9 @@ void main() {
   dn.z = tcCurve(logS.z, uNeg.x, uNeg.y, uNeg.z, uNeg.w, uNegShape.x, uNegShape.y);
   vec3 logPrint = -dn + uDyeLight;
   vec3 dye;
-  dye.x = tcCurve(logPrint.x, uMat.x, uMat.y, 0.0, uDyeDMax.x, uMat.z, uMat.w) * uDyeGain.x / uDyeDMax.x;
-  dye.y = tcCurve(logPrint.y, uMat.x, uMat.y, 0.0, uDyeDMax.y, uMat.z, uMat.w) * uDyeGain.y / uDyeDMax.y;
-  dye.z = tcCurve(logPrint.z, uMat.x, uMat.y, 0.0, uDyeDMax.z, uMat.z, uMat.w) * uDyeGain.z / uDyeDMax.z;
+  dye.x = tcCurve(logPrint.x, uMatA.x, uMat.x, 0.0, uDyeDMax.x, uMat.y, uMat.z) * uDyeGain.x / uDyeDMax.x;
+  dye.y = tcCurve(logPrint.y, uMatA.y, uMat.x, 0.0, uDyeDMax.y, uMat.y, uMat.z) * uDyeGain.y / uDyeDMax.y;
+  dye.z = tcCurve(logPrint.z, uMatA.z, uMat.x, 0.0, uDyeDMax.z, uMat.y, uMat.z) * uDyeGain.z / uDyeDMax.z;
   dye = clamp(dye, 0.0, 1.0) * uDyeMask;
   outColor = vec4(dye, 1.0);
 }`;

@@ -1,6 +1,9 @@
 // GPU parity: the WebGL pipeline of the built site must agree with the Python fixture (and therefore the
-// Swift core and the Metal kernels) on the 32 fixture colours, within the same tolerance the app's simulator
-// tests use. Serves dist/ with the isolation headers, opens it in headless Chromium, calls the parity hook.
+// Swift core and the Metal kernels) on every fixture colour, for the shipped look and each parameter variant the
+// fixture carries (unequal dye D max; lights, flare and no key): within 5e-4 absolute (the half-float density
+// targets alone account for up to about 2e-4) and 0.1 ΔE00 per colour, since an absolute bound alone would let
+// a shadow move by more than a just-noticeable difference. Serves dist/ with the isolation headers, opens it in
+// headless Chromium, calls the parity hook.
 const { chromium } = require('playwright');
 const http = require('node:http');
 const path = require('node:path');
@@ -9,6 +12,42 @@ const { readFileSync, existsSync, statSync } = require('node:fs');
 const root = path.join(__dirname, '..', 'dist');
 const fixture = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'Tests', 'TechnichromeCoreTests', 'Fixtures', 'parity.json'), 'utf8'));
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.map': 'application/json' };
+
+// CIELAB of display-linear Display P3 (D65, white Y = 1) and CIEDE2000 with kL = kC = kH = 1 (Sharma, Wu & Dalal,
+// Color Res. Appl. 30(1), 2005). P3 → XYZ is the matrix the engine derives from the P3 primaries and D65.
+const P3_TO_XYZ = [[0.4865709486482, 0.2656676931691, 0.1982172852344], [0.2289745640697, 0.6917385218365, 0.0792869140937], [0, 0.0451133818589, 1.043944368901]];
+const WHITE = P3_TO_XYZ.map((row) => row[0] + row[1] + row[2]);
+function p3ToLab(rgb) {
+  const f = P3_TO_XYZ.map((row, i) => {
+    const t = (row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2]) / WHITE[i];
+    return t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  });
+  return [116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])];
+}
+function deltaE2000([L1, a1, b1], [L2, a2, b2]) {
+  const rad = Math.PI / 180;
+  const C7 = (c) => Math.sqrt(c ** 7 / (c ** 7 + 25 ** 7));
+  const G = 0.5 * (1 - C7((Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2));
+  const a1p = (1 + G) * a1, a2p = (1 + G) * a2;
+  const C1p = Math.hypot(a1p, b1), C2p = Math.hypot(a2p, b2);
+  const hue = (b, a) => { const h = Math.atan2(b, a) / rad; return h < 0 ? h + 360 : h; };
+  const h1p = hue(b1, a1p), h2p = hue(b2, a2p);
+  let dh = h2p - h1p;
+  if (C1p * C2p === 0) dh = 0; else if (dh > 180) dh -= 360; else if (dh < -180) dh += 360;
+  const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin(dh / 2 * rad);
+  const Lbp = (L1 + L2) / 2, Cbp = (C1p + C2p) / 2, hs = h1p + h2p;
+  const hbp = C1p * C2p === 0 ? hs : Math.abs(h1p - h2p) <= 180 ? hs / 2 : hs < 360 ? (hs + 360) / 2 : (hs - 360) / 2;
+  const T = 1 - 0.17 * Math.cos((hbp - 30) * rad) + 0.24 * Math.cos(2 * hbp * rad) + 0.32 * Math.cos((3 * hbp + 6) * rad) - 0.20 * Math.cos((4 * hbp - 63) * rad);
+  const Sl = 1 + 0.015 * (Lbp - 50) ** 2 / Math.sqrt(20 + (Lbp - 50) ** 2), Sc = 1 + 0.045 * Cbp, Sh = 1 + 0.015 * Cbp * T;
+  const Rt = -Math.sin(2 * 30 * Math.exp(-(((hbp - 275) / 25) ** 2)) * rad) * 2 * C7(Cbp);
+  const l = (L2 - L1) / Sl, c = (C2p - C1p) / Sc, h = dHp / Sh;
+  return Math.sqrt(l * l + c * c + h * h + Rt * c * h);
+}
+// The metric itself, on test pairs 1, 7, 17, 25 and 34 of Sharma et al.
+for (const [p, q, de] of [[[50, 2.6772, -79.7751], [50, 0, -82.7485], 2.0425], [[50, 0, 0], [50, -1, 2], 2.3669], [[50, 2.5, 0], [73, 25, -18], 27.1492],
+  [[60.2574, -34.0099, 36.2677], [60.4626, -34.1751, 39.4387], 1.2644], [[2.0776, 0.0795, -1.1350], [0.9033, -0.0636, -0.5514], 0.9082]]) {
+  if (Math.abs(deltaE2000(p, q) - de) > 1e-4) { console.error(`CIEDE2000 gives ${deltaE2000(p, q)} for Sharma's ${de}`); process.exit(2); }
+}
 
 if (!existsSync(path.join(root, 'index.html'))) { console.error('dist/ is missing: run `npm run build` first'); process.exit(2); }
 
@@ -35,15 +74,23 @@ const server = http.createServer((req, res) => {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForFunction(() => typeof window.__technichromeParity === 'function', null, { timeout: 30000 });
-  const inputs = fixture.samples.map((s) => s.input);
-  const outputs = await page.evaluate(([i, p, d]) => window.__technichromeParity(i, p, d), [inputs, fixture.parameters, fixture.lutDimension]);
-  let worst = 0, worstIndex = -1;
-  outputs.forEach((o, i) => {
-    for (let c = 0; c < 3; c++) {
-      const err = Math.abs(o[c] - fixture.samples[i].output[c]);
-      if (err > worst) { worst = err; worstIndex = i; }
-    }
-  });
+  const blocks = [{ name: 'shipped look', parameters: fixture.parameters, samples: fixture.samples }, ...fixture.variants];
+  const results = [];
+  for (const block of blocks) {
+    const inputs = block.samples.map((s) => s.input);
+    const outputs = await page.evaluate(([i, p, d]) => window.__technichromeParity(i, p, d), [inputs, block.parameters, fixture.lutDimension]);
+    let worst = 0, worstIndex = -1, worstDE = 0, worstDEIndex = -1;
+    outputs.forEach((o, i) => {
+      const expected = block.samples[i].output;
+      for (let c = 0; c < 3; c++) {
+        const err = Math.abs(o[c] - expected[c]);
+        if (err > worst) { worst = err; worstIndex = i; }
+      }
+      const de = deltaE2000(p3ToLab(o), p3ToLab(expected));
+      if (de > worstDE) { worstDE = de; worstDEIndex = i; }
+    });
+    results.push({ block, outputs, worst, worstIndex, worstDE, worstDEIndex });
+  }
   // Tiled and windowed rendering must reproduce the whole-image render: a synthetic image printed whole, in 96 px
   // tiles with their blur halo, and as a crop through a window, compared in float.
   const tiled = await page.evaluate(() => window.__technichromeTiledCheck(331, 247, 96));
@@ -56,8 +103,14 @@ const server = http.createServer((req, res) => {
   const shift = await page.evaluate(() => window.__technichromeShiftCheck());
   await browser.close();
   server.close();
-  const tolerance = 0.02;
-  console.log(`GPU vs Python fixture: worst error ${worst.toFixed(5)} on sample ${worstIndex} (tolerance ${tolerance}); isolation ok; ${errors.length} page errors`);
+  const tolerance = 5e-4, deTolerance = 0.1;
+  for (const r of results) {
+    console.log(`GPU vs Python fixture (${r.block.name}): worst error ${r.worst.toExponential(2)} on sample ${r.worstIndex} (tolerance ${tolerance}), ` +
+      `worst ΔE00 ${r.worstDE.toFixed(4)} on sample ${r.worstDEIndex} (tolerance ${deTolerance})`);
+  }
+  console.log(`isolation ok; ${errors.length} page errors`);
+  const failed = results.filter((r) => !(r.worst < tolerance && r.worstDE < deTolerance));
+  const parityOk = failed.length === 0;
   const tiledTolerance = 1e-4;
   console.log(`tiled vs whole: ${tiled.tiledVsWhole.toExponential(2)} (print, ${tiled.tiles} tiles, halo ${tiled.halo} px), ${tiled.plainTiledVsWhole.toExponential(2)} (plain); crop vs whole: ${tiled.cropVsWhole.toExponential(2)} (tolerance ${tiledTolerance})`);
   const tiledOk = tiled.tiledVsWhole < tiledTolerance && tiled.plainTiledVsWhole < tiledTolerance && tiled.cropVsWhole < tiledTolerance && tiled.halo > 0 && tiled.tiles === 12;
@@ -72,11 +125,12 @@ const server = http.createServer((req, res) => {
   console.log(`misregistration: a uniform image changes by ${shift.uniform.toExponential(2)} (must be < 0.01), a checkerboard by ${shift.textured.toFixed(3)} (must be > 0.001)`);
   const shiftOk = shift.uniform < 0.01 && shift.textured > 0.001;
   if (!shiftOk) console.log('misregistration moved a uniform image, or did nothing to a textured one');
-  if (!(worst < tolerance)) {
-    for (let i = 0; i < Math.min(6, outputs.length); i++) {
-      console.log(`  sample ${i} input ${JSON.stringify(inputs[i])} gpu ${outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${fixture.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
+  for (const r of failed) {
+    console.log(`${r.block.name} does not match the fixture:`);
+    for (let i = 0; i < Math.min(6, r.outputs.length); i++) {
+      console.log(`  sample ${i} input ${JSON.stringify(r.block.samples[i].input)} gpu ${r.outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${r.block.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
     }
   }
   if (errors.length) console.log(errors.join('\n'));
-  if (!(worst < tolerance) || !tiledOk || !spatialOk || !bloomOk || !shiftOk || errors.length) process.exit(1);
+  if (!parityOk || !tiledOk || !spatialOk || !bloomOk || !shiftOk || errors.length) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });

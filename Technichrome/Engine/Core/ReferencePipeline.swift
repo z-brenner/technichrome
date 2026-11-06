@@ -32,8 +32,9 @@ public struct ReferencePipeline: Sendable {
     public func densities(sceneLinear rgb: SIMD3<Double>) -> (dye: SIMD3<Double>, key: Double) {
         let p = parameters
         let scale = pow(2.0, p.exposureEV)
-        let e = SIMD3(max(rgb.x, 0), max(rgb.y, 0), max(rgb.z, 0)) * scale
-        let s = separation * e
+        // The separation applies to the scene as it is: a negative component is a colour outside sRGB (wide-gamut
+        // RAW), not an impossible one. The record exposures cannot be negative and are floored before the log.
+        let s = separation * (rgb * scale)
         let logS = SIMD3(log10(max(s.x, 1e-6)), log10(max(s.y, 1e-6)), log10(max(s.z, 1e-6)))
         let dn = SIMD3(negative.density(logExposure: logS.x), negative.density(logExposure: logS.y), negative.density(logExposure: logS.z))
         let logPrint = -dn

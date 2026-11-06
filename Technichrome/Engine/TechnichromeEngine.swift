@@ -57,8 +57,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
     private let pickChannelsKernel: CIColorKernel
     private let logLuminanceKernel: CIColorKernel
 
-    private let lutLock = NSLock()
-    private var lutCache: (key: PrintModelKey, cube: Data, dimension: Int)?
+    private let cubes: DyeCubeCache
     public let lutDimension: Int
 
     public init(lutDimension: Int = 33) throws {
@@ -81,22 +80,19 @@ public final class TechnichromeEngine: @unchecked Sendable {
         pickChannelsKernel = try load("tc_pick_channels")
         logLuminanceKernel = try load("tc_log_luminance")
         self.lutDimension = lutDimension
+        cubes = DyeCubeCache(dimension: lutDimension, displaySpace: .displayP3, capacity: 4)
     }
 
     // MARK: - LUT
 
-    /// Bakes (and caches) the dye cube for a parameter set. Only the print-model parameters matter
-    /// for the cube, so edits to exposure/curves reuse the cached data.
+    /// The dye cube for a parameter set, baked on first use and kept. Only the print-model parameters matter
+    /// for the cube, so edits to exposure/curves reuse the cached data; up to four sets of print-model inputs
+    /// keep their cubes at once (say the live preview's and the Laboratory's, or two looks being compared), so
+    /// looks used in turn never re-bake. Safe from any queue, for instance to prewarm a cube in the background:
+    /// the bake runs outside the cache's lock, so a caller whose cube is already cached never waits for it.
     public func cubeData(for p: EngineParameters) -> (Data, Int) {
-        let key = PrintModelKey(p)
-        lutLock.lock(); defer { lutLock.unlock() }
-        if let c = lutCache, c.key == key {
-            return (c.cube, c.dimension)
-        }
-        let lut = LUTBuilder.build(parameters: p, dimension: lutDimension, displaySpace: .displayP3)
-        let data = lut.data.withUnsafeBufferPointer { Data(buffer: $0) }
-        lutCache = (key, data, lut.dimension)
-        return (data, lut.dimension)
+        let cube = cubes.cube(for: p)
+        return (cube.data, cube.dimension)
     }
 
     // MARK: - Graph
@@ -132,11 +128,14 @@ public final class TechnichromeEngine: @unchecked Sendable {
 
         // Three-strip camera, negatives, matrices → dye densities
         let neg = CharacteristicCurve(p.negative)
-        let mat = CharacteristicCurve(p.matrixCurve(0))   // gamma/logE0/toe/shoulder shared across dyes
+        // One matrix curve per dye: gamma, logE0 and ν are shared, but the steepness a = γ / (span · slope at
+        // half density) depends on each dye's D max, so it goes to the kernel per dye.
+        let mats = (0..<3).map { CharacteristicCurve(p.matrixCurve($0)) }
         let sep = p.separation
         let negVec = CIVector(x: CGFloat(neg.a), y: CGFloat(neg.logE0), z: CGFloat(neg.dMin), w: CGFloat(neg.span))
         let negShape = CIVector(x: CGFloat(neg.xHalf), y: CGFloat(neg.nu))
-        let matVec = CIVector(x: CGFloat(mat.a), y: CGFloat(mat.logE0), z: CGFloat(mat.xHalf), w: CGFloat(mat.nu))
+        let matA = CIVector(x: CGFloat(mats[0].a), y: CGFloat(mats[1].a), z: CGFloat(mats[2].a))
+        let matVec = CIVector(x: CGFloat(mats[0].logE0), y: CGFloat(mats[0].xHalf), z: CGFloat(mats[0].nu))
         let dmax = CIVector(x: CGFloat(p.dyeDMax[0]), y: CGFloat(p.dyeDMax[1]), z: CGFloat(p.dyeDMax[2]))
         let gain = CIVector(x: CGFloat(p.dyeGain[0]), y: CGFloat(p.dyeGain[1]), z: CGFloat(p.dyeGain[2]))
         let l10 = log10(2.0)
@@ -144,7 +143,7 @@ public final class TechnichromeEngine: @unchecked Sendable {
         func row(_ i: Int) -> CIVector { CIVector(x: CGFloat(sep[i, 0]), y: CGFloat(sep[i, 1]), z: CGFloat(sep[i, 2])) }
 
         guard var densities = separateKernel.apply(extent: extent, arguments: [
-            src, glow, bloomAmount, exposureScale, row(0), row(1), row(2), negVec, negShape, matVec, dmax, gain, light, dyeMask.vector
+            src, glow, bloomAmount, exposureScale, row(0), row(1), row(2), negVec, negShape, matA, matVec, dmax, gain, light, dyeMask.vector
         ]) else { return input }
 
         // Silver key image
