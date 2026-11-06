@@ -12,6 +12,9 @@ if len(sys.argv) > 2:
     for k, v in json.load(open(sys.argv[2])).items():
         if hasattr(params, k):
             setattr(params, k, tuple(v) if isinstance(v, list) else v)
+# The engine renders the P3 print and develop() below converts it to sRGB once; a JSON asking for display 'srgb'
+# would otherwise have it converted twice.
+params.display = 'p3'
 eng = T.Engine(params, lut_size=33)
 
 
