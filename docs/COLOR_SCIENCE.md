@@ -217,6 +217,14 @@ whose recipes he calls "schematic only"; George Eastman Museum), the blends were
 and differed between London and Hollywood (Ruivo, *Film Atlas*), and FilmColors' authors write that
 their development "has not been documented to date".
 
+**Why Technichrome v1's dyes stay the default for now.** No measured set is "the" Technicolor dyes: the
+dyes varied by laboratory and era. The US 1949 curves are extractions that depend on their statistical
+model, and the two published analyses of that trailer print 4.5 ΔE00 apart on average (below). The UK
+set is the best measured, but the tone scale was fitted (`fit_tone.py`) with v1's dyes, so with the UK
+dyes mid grey prints about 2.7 L* darker (48.3 against 51.0). About +0.12 EV of print exposure in the
+Laboratory restores mid grey; the shadows then stay about 1.6 L* darker, which only a re-fit of the
+tone scale removes. The default changes only after that re-fit and a look at the sets on real captures.
+
 **Technichrome v1 — approximation (the default).** Our own dyes, from before any measurement was at
 hand; gains 1.202 / 0.909 / 0.889.
 
