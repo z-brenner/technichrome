@@ -41,9 +41,14 @@ struct DevelopView: View {
     @State private var finalImage: CGImage?
     @State private var developed = false
     @State private var failure: String?
+    /// A failed save (Photos access denied, for example) keeps the develop screen open, unlike `failure`.
+    @State private var saveError: String?
     @State private var saved = false
     @State private var comparing = false
     @State private var appleImage: UIImage?
+    @State private var showsLab = false
+    /// The stored record when the Laboratory opened, to tell on its dismissal whether it re-developed the photograph.
+    @State private var recordBeforeLab: PhotoRecord?
 
     var body: some View {
         ZStack {
@@ -60,6 +65,17 @@ struct DevelopView: View {
         .alert("Development failed", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK") { dismiss() }
         } message: { Text(failure ?? "") }
+        .alert("Could not save to Photos", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("OK") {}
+        } message: { Text(saveError ?? "") }
+        // Presented from this cover, not from RootView: RootView is already presenting the cover and UIKit lets a
+        // view controller present one modal at a time, so a sheet requested there is dropped.
+        .sheet(isPresented: $showsLab, onDismiss: reloadAfterLab) {
+            // The stored record, which carries the print timing and parameters this develop wrote.
+            LaboratoryView(record: model.store.record(id: record.id) ?? record)
+                .environment(model)
+                .presentationDetents([.large])
+        }
     }
 
     private var header: some View {
@@ -125,8 +141,8 @@ struct DevelopView: View {
                     .buttonStyle(.plain)
                 }
                 PillButton(title: "Lab") {
-                    model.selectedPhoto = record
-                    model.showsLaboratory = true
+                    recordBeforeLab = model.store.record(id: record.id)
+                    showsLab = true
                 }
                 .disabled(!developed)
                 .opacity(developed ? 1 : 0.4)
@@ -145,11 +161,25 @@ struct DevelopView: View {
         let params = model.parameters
         let store = model.store
         let rec = record
-        // Print timing and quick preview stages at reduced scale
-        let (stages, timing) = await Task.detached(priority: .userInitiated) { () -> ([Stage: CGImage], Double) in
-            do {
-                let (linear, baseline) = try dev.linearSource(for: rec, store: store, scaleFactor: 0.25, draft: true)
-                let timing = dev.measureTiming(linear: linear, baselineEV: baseline, parameters: params, cameraBiasEV: Double(rec.exposureBias))
+        // One quick decode, materialised (see DevelopService.quickSource), gives the print timing and the four
+        // stages of the reveal. If it fails, the full develop below reports why.
+        let quick = await Task.detached(priority: .userInitiated) { () -> (CIImage, Double, Double)? in
+            guard let source = try? dev.quickSource(for: rec, store: store) else { return nil }
+            let (linear, baseline) = source
+            let timing = dev.measureTiming(linear: linear, baselineEV: baseline, parameters: params, cameraBiasEV: Double(rec.exposureBias))
+            return (linear, baseline, timing)
+        }.value
+        var timed = rec
+        timed.printTimingEV = quick?.2 ?? 0
+        try? store.save(timed)
+        let timedRecord = timed
+        // The full-resolution develop needs only the timing, so it starts now, while the stages are rendered.
+        let full = Task.detached(priority: .userInitiated) { () throws -> DevelopedImage in
+            try dev.developToDisk(record: timedRecord, store: store, parameters: params, extraEV: timedRecord.totalPrintEV)
+        }
+        if let quick {
+            let (linear, baseline, timing) = quick
+            stageImages = await Task.detached(priority: .userInitiated) { () -> [Stage: CGImage] in
                 let longEdge = Double(max(linear.extent.width, linear.extent.height))
                 var out: [Stage: CGImage] = [:]
                 for s in [Stage.key, .yellow, .cyan, .magenta] {
@@ -157,27 +187,20 @@ struct DevelopView: View {
                                             fullLongEdge: longEdge, dyeMask: s.mask, spatial: false)
                     if let cg = dev.render(img) { out[s] = cg }
                 }
-                return (out, timing)
-            } catch {
-                return ([:], 0)
-            }
-        }.value
-        stageImages = stages
-        var timed = rec
-        timed.printTimingEV = timing
-        try? store.save(timed)
-        let timedRecord = timed
-        // Play the reveal while the full-resolution develop runs
-        let full = Task.detached(priority: .userInitiated) { () throws -> DevelopedImage in
-            try dev.developToDisk(record: timedRecord, store: store, parameters: params, extraEV: timedRecord.totalPrintEV)
+                return out
+            }.value
         }
+        // Play the reveal while the full-resolution develop runs
         for s in [Stage.yellow, .cyan, .magenta] {
             try? await Task.sleep(for: .milliseconds(520))
             stage = s
         }
+        // Apple's rendering, decoded off the main thread at screen size (it is only compared on screen; at full
+        // size a 48 MP companion would be a 195 MB bitmap decoded on the main thread when first drawn).
         let appleURL = store.appleURL(for: rec)
-        if FileManager.default.fileExists(atPath: appleURL.path) {
-            appleImage = UIImage(contentsOfFile: appleURL.path)
+        if FileManager.default.fileExists(atPath: appleURL.path),
+           let companion = await Task.detached(priority: .utility, operation: { DevelopService.decodeDownscaled(appleURL, maxPixelSize: 2048) }).value {
+            appleImage = UIImage(cgImage: companion)
         }
         do {
             let result = try await full.value
@@ -186,6 +209,8 @@ struct DevelopView: View {
             updated.isDeveloped = true
             updated.baselineExposure = result.baselineExposure
             updated.parameters = params
+            updated.decoderVersion = result.decoderVersion     // pinned for re-develops (RAWDeveloper.configure)
+            updated.highlightRecovery = result.highlightRecovery
             try? store.save(updated)
             developed = true
             Haptics.success()
@@ -194,14 +219,31 @@ struct DevelopView: View {
         }
     }
 
+    /// The Laboratory may have re-developed the photograph (a new developed.jpg, and new parameters and timing on the
+    /// stored record): show that print, decoded off the main thread at a bounded size, and let it be saved even if
+    /// the earlier one was, so that what is shown, saved and shared is the same print.
+    private func reloadAfterLab() {
+        guard let latest = model.store.record(id: record.id), latest != recordBeforeLab else { return }
+        saved = false
+        let url = model.store.developedURL(for: latest)
+        Task {
+            if let image = await Task.detached(priority: .userInitiated, operation: { DevelopService.decodeDownscaled(url, maxPixelSize: 4096) }).value {
+                finalImage = image
+            }
+        }
+    }
+
     private func save() {
         Task {
             do {
-                try await ExportService.saveToPhotos(record: record, store: model.store, includeRAW: model.settings.saveRAWWithPrint)
+                // The stored record: a re-develop from the Laboratory changes its parameters and timing.
+                let current = model.store.record(id: record.id) ?? record
+                try await ExportService.saveToPhotos(record: current, store: model.store, includeRAW: model.settings.saveRAWWithPrint)
                 saved = true
                 Haptics.success()
             } catch {
-                failure = error.localizedDescription
+                saveError = error.localizedDescription
+                Haptics.error()
             }
         }
     }

@@ -69,12 +69,14 @@ struct GalleryView: View {
 
             if model.store.records.isEmpty {
                 Spacer()
-                VStack(spacing: 10) {
-                    TCLabel("no photographs yet", size: 12, color: Theme.ivory)
-                    Text("Photographs you take live here, with their original RAW files. A DNG from Photos or Files can be imported and developed too.")
-                        .font(Theme.body(14)).foregroundStyle(Theme.ivoryDim).multilineTextAlignment(.center)
+                if model.store.isLoaded {         // not while the library is still being read at launch
+                    VStack(spacing: 10) {
+                        TCLabel("no photographs yet", size: 12, color: Theme.ivory)
+                        Text("Photographs you take live here, with their original RAW files. A DNG from Photos or Files can be imported and developed too.")
+                            .font(Theme.body(14)).foregroundStyle(Theme.ivoryDim).multilineTextAlignment(.center)
+                    }
+                    .padding(40)
                 }
-                .padding(40)
                 Spacer()
             } else {
                 ScrollView {
@@ -93,7 +95,6 @@ struct GalleryView: View {
             PhotoDetailView(record: r)
                 .environment(model)
         }
-        .onAppear { model.store.reload() }
         .confirmationDialog("Import a photograph", isPresented: $choosingImport, titleVisibility: .visible) {
             Button("From Photos") { showsPhotosPicker = true }
             Button("From Files") { showsFileImporter = true }
@@ -133,12 +134,9 @@ struct GalleryView: View {
         Task {
             do {
                 let url = try result.get()
-                let data = try await Task.detached(priority: .userInitiated) { () throws -> Data in
-                    let secured = url.startAccessingSecurityScopedResource()
-                    defer { if secured { url.stopAccessingSecurityScopedResource() } }
-                    return try Data(contentsOf: url)
-                }.value
-                try await importData(data)
+                // Mapped and copied, not read into memory (PhotoStore.add(importedFileAt:)).
+                let record = try await model.store.add(importedFileAt: url)
+                developImported(record)
             } catch {
                 importError = error.localizedDescription
             }
@@ -147,6 +145,10 @@ struct GalleryView: View {
 
     private func importData(_ data: Data) async throws {
         let record = try await model.store.add(importedData: data)
+        developImported(record)
+    }
+
+    private func developImported(_ record: PhotoRecord) {
         Haptics.tick()
         model.developing = record
     }
@@ -155,14 +157,16 @@ struct GalleryView: View {
 struct Thumbnail: View {
     @Environment(AppModel.self) private var model
     let record: PhotoRecord
+    @State private var image: UIImage?
+    @State private var loaded = false
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Color(white: 0.06)
-                if let ui = UIImage(contentsOfFile: model.store.thumbnailURL(for: record).path) {
-                    Image(uiImage: ui).resizable().scaledToFill()
-                } else {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else if loaded {
                     TCLabel("undeveloped", size: 8)
                 }
             }
@@ -170,5 +174,36 @@ struct Thumbnail: View {
             .clipped()
         }
         .aspectRatio(1, contentMode: .fit)
+        // Off the main thread, and again whenever the record changes (a develop or a re-develop finished).
+        .task(id: record) {
+            let url = model.store.thumbnailURL(for: record)
+            image = await ThumbnailCache.shared.image(at: url, maxPixelSize: 400)   // a third of the screen, in pixels
+            loaded = true
+        }
+    }
+}
+
+/// Gallery thumbnails, decoded by ImageIO off the main thread at the size they are shown, and kept. They used to
+/// be read and decoded on the main thread in `body`: per cell while scrolling, and for the camera's gallery
+/// button on every exposure tick. The key holds the file's modification date, so a re-developed print's new
+/// thumbnail is decoded again.
+actor ThumbnailCache {
+    static let shared = ThumbnailCache()
+    private let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.totalCostLimit = 48 << 20          // bytes of decoded bitmaps
+        return c
+    }()
+
+    func image(at url: URL, maxPixelSize: Int) -> UIImage? {
+        guard let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else {
+            return nil                       // no thumbnail yet
+        }
+        let key = "\(url.path)|\(modified.timeIntervalSinceReferenceDate)|\(maxPixelSize)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        guard let decoded = DevelopService.decodeDownscaled(url, maxPixelSize: maxPixelSize) else { return nil }
+        let image = UIImage(cgImage: decoded)
+        cache.setObject(image, forKey: key, cost: decoded.bytesPerRow * decoded.height)
+        return image
     }
 }

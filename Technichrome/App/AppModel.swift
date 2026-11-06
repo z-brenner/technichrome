@@ -39,6 +39,20 @@ final class AppModel {
 
     private static let parametersKey = "technichrome.parameters.v1"
 
+    /// The live preview's renderer, with its Metal command queue and CIContext, made once for the app's
+    /// lifetime. The camera view leaves the hierarchy on every trip to the gallery, and a context is costly to
+    /// make (Apple: "it is not recommended to create many CIContext instances"); a new one per visit also
+    /// meant compiling the kernels again, while the camera's frame handler kept the old one alive.
+    @ObservationIgnored private var renderer: PreviewRenderer?
+
+    func previewRenderer() -> PreviewRenderer? {
+        if let renderer { return renderer }
+        guard let r = PreviewRenderer(engine: engine) else { return nil }
+        renderer = r
+        camera.frameHandler = { buffer in r.submit(pixelBuffer: buffer) }   // set once, before the camera first runs
+        return r
+    }
+
     init() {
         do {
             let e = try TechnichromeEngine(lutDimension: 33)
@@ -56,16 +70,27 @@ final class AppModel {
         }
         camera.captureCompanionHEIF = settings.captureCompanionHEIF
         camera.fullResolutionRAW = settings.fullResolutionRAW
+        prewarmCube(for: parameters)
     }
 
     func saveParametersAsDefault(_ p: EngineParameters) {
         parameters = p
         if let data = try? p.jsonData() { UserDefaults.standard.set(data, forKey: Self.parametersKey) }
+        prewarmCube(for: p)
     }
 
     func resetParameters() {
         parameters = .default
         UserDefaults.standard.removeObject(forKey: Self.parametersKey)
+        prewarmCube(for: .default)
+    }
+
+    /// Bakes the dye cube for the preview's parameters on a background queue (the engine is thread-safe), so
+    /// the live preview's first frame, and the first after "Set as default", finds it baked instead of baking
+    /// it on the main thread.
+    private func prewarmCube(for p: EngineParameters) {
+        guard let engine else { return }
+        Task.detached(priority: .utility) { _ = engine.cubeData(for: p) }
     }
 }
 

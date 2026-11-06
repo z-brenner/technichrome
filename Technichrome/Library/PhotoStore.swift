@@ -37,6 +37,12 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
     /// File name of the original inside the photograph's folder when it is not the default (imports keep
     /// their container type: original.jpg, original.tiff, …).
     public var originalFile: String?
+    /// The CIRAWFilter decoder version the print was developed with (nil before the first develop, and for
+    /// display-referred originals). A re-develop asks for the same one, so an iOS update does not change it.
+    public var decoderVersion: String?
+    /// Whether CIRAWFilter's highlight recovery was on for the print (nil: the decoder's default, where the app
+    /// cannot set it).
+    public var highlightRecovery: Bool?
 
     public var originalFileName: String { originalFile ?? (rawKind == .none ? "original.heic" : "original.dng") }
     public var hasRAW: Bool { rawKind != .none }
@@ -71,6 +77,8 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
         parameters = try c.decodeIfPresent(EngineParameters.self, forKey: .parameters)
         isDeveloped = try c.decodeIfPresent(Bool.self, forKey: .isDeveloped) ?? false
         originalFile = try c.decodeIfPresent(String.self, forKey: .originalFile)
+        decoderVersion = try c.decodeIfPresent(String.self, forKey: .decoderVersion)
+        highlightRecovery = try c.decodeIfPresent(Bool.self, forKey: .highlightRecovery)
     }
 }
 
@@ -78,13 +86,21 @@ public struct PhotoRecord: Codable, Identifiable, Equatable, Sendable {
 @Observable
 public final class PhotoStore {
     public private(set) var records: [PhotoRecord] = []
+    /// Whether the library on disk has been read (see `init`); until then `records` holds only what was added.
+    public private(set) var isLoaded = false
     public nonisolated let root: URL
 
     public init(root: URL? = nil) {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        self.root = root ?? docs.appendingPathComponent("Photos", isDirectory: true)
-        try? FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
-        reload()
+        let root = root ?? docs.appendingPathComponent("Photos", isDirectory: true)
+        self.root = root
+        // The library is read once, off the main thread. It used to be read on the main thread at launch (in
+        // AppModel.init) and again on every gallery appearance, a cost that grew with the number of photographs.
+        // The store is the only writer afterwards, so it stays current without reading again.
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) { PhotoStore.loadRecords(root: root) }.value
+            self?.merge(loaded)
+        }
     }
 
     public nonisolated func folder(for id: UUID) -> URL { root.appendingPathComponent(id.uuidString, isDirectory: true) }
@@ -94,9 +110,11 @@ public final class PhotoStore {
     public nonisolated func thumbnailURL(for r: PhotoRecord) -> URL { folder(for: r.id).appendingPathComponent("thumb.jpg") }
     private nonisolated func recordURL(for id: UUID) -> URL { folder(for: id).appendingPathComponent("record.json") }
 
-    public func reload() {
+    /// Every record under `root`, newest first. Runs off the main thread.
+    nonisolated static func loadRecords(root: URL) -> [PhotoRecord] {
         let fm = FileManager.default
-        guard let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { records = []; return }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        guard let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return [] }
         var found: [PhotoRecord] = []
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
@@ -106,7 +124,14 @@ public final class PhotoStore {
                 found.append(r)
             }
         }
-        records = found.sorted { $0.capturedAt > $1.capturedAt }
+        return found.sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    /// Adds the records read from disk after those added since launch, which are the newest and stay first.
+    private func merge(_ loaded: [PhotoRecord]) {
+        let known = Set(records.map(\.id))
+        records += loaded.filter { !known.contains($0.id) }
+        isLoaded = true
     }
 
     /// Persists a capture: writes the original (DNG or HEIF) and the optional Apple companion off the
@@ -141,10 +166,38 @@ public final class PhotoStore {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
         }.value
+        return try register(info, id: id)
+    }
+
+    /// Adds a file chosen in Files without reading it into memory: it is mapped for the tag inspection (which
+    /// reads only the header and the tags) and copied by the file system. A 48 MP ProRAW is up to about 100 MB,
+    /// which was read whole, inspected and written out again.
+    @discardableResult
+    public func add(importedFileAt url: URL) async throws -> PhotoRecord {
+        let id = UUID()
+        let dir = folder(for: id)
+        let info = try await Task.detached(priority: .userInitiated) { () throws -> ImportedFile in
+            let secured = url.startAccessingSecurityScopedResource()
+            defer { if secured { url.stopAccessingSecurityScopedResource() } }
+            let info = try ImportedFile(data: Data(contentsOf: url, options: .mappedIfSafe))
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: url, to: dir.appendingPathComponent(info.fileName))
+            } catch {
+                try? FileManager.default.removeItem(at: dir)     // no half-imported folder
+                throw error
+            }
+            return info
+        }.value
+        return try register(info, id: id)
+    }
+
+    /// The undeveloped record of an imported file, saved and listed first.
+    private func register(_ info: ImportedFile, id: UUID) throws -> PhotoRecord {
         let record = PhotoRecord(id: id, capturedAt: info.capturedAt ?? Date(), rawKind: info.rawKind, lens: .wide,
                                  pixelWidth: info.pixelWidth, pixelHeight: info.pixelHeight, cameraModel: info.cameraModel,
                                  iso: info.iso, exposureDuration: info.exposureDuration, exposureBias: 0, baselineExposure: 0,
-                                 printExposureEV: 0, parameters: nil, isDeveloped: false, originalFile: fileName)
+                                 printExposureEV: 0, parameters: nil, isDeveloped: false, originalFile: info.fileName)
         try save(record)
         records.insert(record, at: 0)
         return record

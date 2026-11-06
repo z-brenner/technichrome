@@ -18,6 +18,14 @@ struct PhotoDetailView: View {
     @State private var confirmDelete = false
     @State private var message: String?
     @State private var showsInfo = false
+    @State private var showsLab = false
+    @State private var loaded = false
+    /// Bumped to decode the print again (after the Laboratory, which may have re-developed it).
+    @State private var reloadToken = 0
+    #if DEBUG
+    @State private var measuring = false
+    @State private var measurementFiles: [URL] = []
+    #endif
 
     var body: some View {
         ZStack {
@@ -37,7 +45,7 @@ struct PhotoDetailView: View {
                                 .onChanged { v in zoom = max(1, min(5, lastZoom * v.magnification)) }
                                 .onEnded { _ in lastZoom = zoom })
                             .onTapGesture(count: 2) { withAnimation(.spring(response: 0.3)) { zoom = 1; lastZoom = 1 } }
-                    } else {
+                    } else if loaded {
                         TCLabel("undeveloped", size: 11)
                     }
                 }
@@ -50,7 +58,7 @@ struct PhotoDetailView: View {
                 footer
             }
         }
-        .task { load() }
+        .task(id: reloadToken) { await load() }
         .confirmationDialog("Delete this photograph and its RAW file?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 model.store.delete(record)
@@ -60,6 +68,13 @@ struct PhotoDetailView: View {
         .alert("Technichrome", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("OK") {}
         } message: { Text(message ?? "") }
+        // Presented from this cover, not from RootView, which cannot present while a cover is up (see DevelopView).
+        // The print is reloaded afterwards, since the Laboratory may have re-developed it.
+        .sheet(isPresented: $showsLab, onDismiss: { reloadToken += 1 }) {
+            LaboratoryView(record: model.store.record(id: record.id) ?? record)
+                .environment(model)
+                .presentationDetents([.large])
+        }
     }
 
     private var header: some View {
@@ -82,14 +97,23 @@ struct PhotoDetailView: View {
     }
 
     private var infoPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            row("Source", record.rawKind == .none ? "No RAW (display-referred image)" : "\(record.rawKind.rawValue) · \(record.pixelWidth)×\(record.pixelHeight)")
-            row("Camera", record.cameraModel ?? "—")
-            if let iso = record.iso, let t = record.exposureDuration {
-                row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), record.exposureBias))
+        // The stored record, so a re-develop in the Laboratory (its timing, its decoder) shows here at once.
+        let r = model.store.record(id: record.id) ?? record
+        return VStack(alignment: .leading, spacing: 6) {
+            row("Source", r.rawKind == .none ? "No RAW (display-referred image)" : "\(r.rawKind.rawValue) · \(r.pixelWidth)×\(r.pixelHeight)")
+            row("Camera", r.cameraModel ?? "—")
+            if let iso = r.iso, let t = r.exposureDuration {
+                row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), r.exposureBias))
             }
-            row("Baseline", String(format: "%+.2f EV (DNG)", record.baselineExposure))
-            row("Print", "\(record.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", record.printExposureEV)) EV · timed \(String(format: "%+.2f", record.printTimingEV)) EV")
+            row("Baseline", String(format: "%+.2f EV (DNG)", r.baselineExposure))
+            if let version = r.decoderVersion {
+                let highlights = r.highlightRecovery.map { $0 ? "on" : "off" } ?? "decoder default"
+                row("Decoder", "CIRAWFilter \(version) · highlight recovery \(highlights)")
+            }
+            #if DEBUG
+            if r.hasRAW { measurementRow }
+            #endif
+            row("Print", "\(r.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", r.printExposureEV)) EV · timed \(String(format: "%+.2f", r.printTimingEV)) EV")
         }
         .padding(14)
         .background(Theme.panel)
@@ -105,6 +129,38 @@ struct PhotoDetailView: View {
             Spacer()
         }
     }
+
+    #if DEBUG
+    /// Debug builds only: the decode measurement of docs/HARDWARE_CHECKLIST.md (DevelopService.writeLinearMeasurements).
+    private var measurementRow: some View {
+        HStack(spacing: 12) {
+            Button(measuring ? "Writing linear decodes…" : "Write linear decodes (TIFF)") { writeMeasurements() }
+                .disabled(measuring)
+            if !measurementFiles.isEmpty {
+                ShareLink(items: measurementFiles) { Text("Share \(measurementFiles.count) files") }
+            }
+        }
+        .font(Theme.mono(11))
+        .tint(Theme.ivory)
+    }
+
+    private func writeMeasurements() {
+        guard let dev = model.develop else { return }
+        let store = model.store
+        let rec = store.record(id: record.id) ?? record      // with the decoder version it was developed with
+        measuring = true
+        Task {
+            do {
+                measurementFiles = try await Task.detached(priority: .userInitiated) {
+                    try dev.writeLinearMeasurements(for: rec, store: store)
+                }.value
+            } catch {
+                message = error.localizedDescription
+            }
+            measuring = false
+        }
+    }
+    #endif
 
     private var footer: some View {
         HStack(spacing: 10) {
@@ -127,10 +183,7 @@ struct PhotoDetailView: View {
                     .overlay(Capsule().strokeBorder(Theme.ivoryFaint, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            PillButton(title: "Lab") {
-                model.selectedPhoto = record
-                model.showsLaboratory = true
-            }
+            PillButton(title: "Lab") { showsLab = true }
             PillButton(title: "Delete") { confirmDelete = true }
         }
         .padding(.bottom, 28)
@@ -146,9 +199,21 @@ struct PhotoDetailView: View {
         return items
     }
 
-    private func load() {
-        image = UIImage(contentsOfFile: model.store.developedURL(for: record).path)
-        let a = model.store.appleURL(for: record)
-        if FileManager.default.fileExists(atPath: a.path) { appleImage = UIImage(contentsOfFile: a.path) }
+    /// Decodes the print and Apple's rendering off the main thread, at a bounded size. `UIImage(contentsOfFile:)`
+    /// decoded them in full on the main thread when first drawn: a 48 MP print is a 195 MB bitmap. 4096 px keeps
+    /// the zoom sharp to about 3.5× on a phone screen; the companion is only ever shown at screen size.
+    private func load() async {
+        let printURL = model.store.developedURL(for: record)
+        let appleURL = model.store.appleURL(for: record)
+        let (developed, companion) = await Task.detached(priority: .userInitiated) { () -> (CGImage?, CGImage?) in
+            let developed = DevelopService.decodeDownscaled(printURL, maxPixelSize: 4096)
+            let companion = FileManager.default.fileExists(atPath: appleURL.path)
+                ? DevelopService.decodeDownscaled(appleURL, maxPixelSize: 2048) : nil
+            return (developed, companion)
+        }.value
+        if Task.isCancelled { return }
+        image = developed.map { UIImage(cgImage: $0) }
+        appleImage = companion.map { UIImage(cgImage: $0) }
+        loaded = true
     }
 }

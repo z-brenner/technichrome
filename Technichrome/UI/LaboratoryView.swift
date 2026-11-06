@@ -18,9 +18,14 @@ struct LaboratoryView: View {
 
     @State private var params: EngineParameters = .default
     @State private var preview: CGImage?
-    @State private var linearCache: (CIImage, Double, Double)?   // image, baseline, long edge
+    /// The materialised quick decode (DevelopService.quickSource): image, baseline, long edge.
+    @State private var linearCache: (CIImage, Double, Double)?
+    /// The print timing of the current parameters on this photograph (DevelopService.printTiming).
+    @State private var timing: Double?
     @State private var renderTask: Task<Void, Never>?
     @State private var busy = false
+    /// Why the photograph could not be opened or rendered (shown in place of the preview).
+    @State private var loadError: String?
     @State private var message: String?
     @State private var exportURL: URL?
     @State private var importing = false
@@ -83,6 +88,12 @@ struct LaboratoryView: View {
                 } else {
                     Image(decorative: preview, scale: 1, orientation: .up).resizable().scaledToFit()
                 }
+            } else if let loadError {
+                VStack(spacing: 8) {
+                    TCLabel("could not open this photograph", size: 10, color: Theme.ivory)
+                    Text(loadError).font(Theme.body(12)).foregroundStyle(Theme.ivoryDim).multilineTextAlignment(.center)
+                }
+                .padding(24)
             } else {
                 TCLabel(record == nil ? "take a photograph to see it here" : "rendering", size: 10)
             }
@@ -129,12 +140,18 @@ struct LaboratoryView: View {
         guard let record, let dev = model.develop else { return }
         let store = model.store
         Task.detached(priority: .userInitiated) {
-            guard let source = try? dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true) else { return }
-            let (img, baseline) = source
-            let longEdge = Double(max(img.extent.width, img.extent.height))
-            await MainActor.run {
-                linearCache = (img, baseline, longEdge)
-                scheduleRender()
+            do {
+                // Decoded once and materialised: each slider movement then renders the engine only, not the RAW decoder.
+                let (img, baseline) = try dev.quickSource(for: record, store: store)
+                let longEdge = Double(max(img.extent.width, img.extent.height))
+                await MainActor.run {
+                    linearCache = (img, baseline, longEdge)
+                    scheduleRender()
+                }
+            } catch {
+                // Without this the preview would say "rendering" for ever (a deleted original, an undecodable file).
+                let text = error.localizedDescription
+                await MainActor.run { loadError = text }
             }
         }
     }
@@ -148,10 +165,16 @@ struct LaboratoryView: View {
         renderTask = Task.detached(priority: .userInitiated) {
             try? await Task.sleep(for: .milliseconds(60))
             if Task.isCancelled { return }
-            let out = dev.makePrint(linear: img, baselineEV: baseline, parameters: p, extraEV: record.totalPrintEV, fullLongEdge: longEdge)
+            // Timed with these parameters: the timing sliders and the print exposure move the timing too.
+            let t = dev.printTiming(for: record, parameters: p, linear: img, baselineEV: baseline)
+            let out = dev.makePrint(linear: img, baselineEV: baseline, parameters: p, extraEV: record.printExposureEV + t, fullLongEdge: longEdge)
             let cg = dev.render(out)
             if Task.isCancelled { return }
-            await MainActor.run { preview = cg; busy = false }
+            await MainActor.run {
+                if let cg { preview = cg } else if preview == nil { loadError = DevelopError.renderFailed.localizedDescription }
+                timing = t
+                busy = false
+            }
         }
     }
 
@@ -164,10 +187,18 @@ struct LaboratoryView: View {
             slider("Timing strength", $params.timingStrength, 0...1, step: 0.05, format: "%.2f")
             slider("Timing target (scene key)", $params.timingTarget, 0.08...0.3, step: 0.005, format: "%.3f")
             if let record {
-                Text(String(format: "This photograph was timed %+.2f EV at develop time; the preview uses that value.", record.printTimingEV))
-                    .font(.footnote).foregroundStyle(Theme.ivoryDim)
+                Text(timingNote(record)).font(.footnote).foregroundStyle(Theme.ivoryDim)
             }
         }
+    }
+
+    private func timingNote(_ record: PhotoRecord) -> String {
+        let now = timing ?? record.printTimingEV
+        if abs(now - record.printTimingEV) < 0.005 {
+            return String(format: "This photograph is timed %+.2f EV, as at develop time.", now)
+        }
+        return String(format: "Timed %+.2f EV with these parameters (%+.2f EV at develop time); the preview and a re-develop use the new value.",
+                      now, record.printTimingEV)
     }
 
     private var cameraSection: some View {
@@ -350,13 +381,18 @@ struct LaboratoryView: View {
         guard let dev = model.develop else { return }
         let p = params
         let store = model.store
+        let cached = linearCache
         busy = true
         Task.detached(priority: .userInitiated) {
             do {
-                let result = try dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.totalPrintEV)
+                // Timed with these parameters, and the timing stored with them, so the print and its record agree.
+                let (linear, baseline) = try cached.map { ($0.0, $0.1) } ?? dev.quickSource(for: record, store: store)
+                let timing = dev.printTiming(for: record, parameters: p, linear: linear, baselineEV: baseline)
+                let result = try dev.developToDisk(record: record, store: store, parameters: p, extraEV: record.printExposureEV + timing)
                 await MainActor.run {
-                    var r = record
-                    r.parameters = p; r.isDeveloped = true; r.baselineExposure = result.baselineExposure
+                    var r = store.record(id: record.id) ?? record
+                    r.parameters = p; r.printTimingEV = timing; r.isDeveloped = true; r.baselineExposure = result.baselineExposure
+                    r.decoderVersion = result.decoderVersion; r.highlightRecovery = result.highlightRecovery
                     try? store.save(r)
                     busy = false
                     message = "Re-developed at full resolution."

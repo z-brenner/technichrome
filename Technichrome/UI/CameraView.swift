@@ -33,12 +33,19 @@ struct CameraView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .onAppear { setUp() }
-        .onDisappear { model.camera.stop() }
+        .onDisappear {
+            model.camera.stop()
+            renderer?.releaseFrame()
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { model.camera.start() } else if phase == .background { model.camera.stop() }
+            if phase == .active { if !cameraCovered { model.camera.start() } } else if phase == .background { model.camera.stop() }
+        }
+        .onChange(of: cameraCovered) { _, covered in
+            if covered { model.camera.stop() } else if scenePhase == .active { model.camera.start() }
         }
         .onChange(of: model.parameters) { _, p in renderer?.parameters = p }
         .onChange(of: model.camera.exposureBias) { _, ev in renderer?.cameraBiasEV = Double(ev) }
+        .onChange(of: model.camera.pressure) { _, p in renderer?.systemPressure = p }
         .alert("Capture failed", isPresented: Binding(get: { captureError != nil }, set: { if !$0 { captureError = nil } })) {
             Button("OK") {}
         } message: { Text(captureError ?? "") }
@@ -97,10 +104,27 @@ struct CameraView: View {
         }
     }
 
+    /// The camera runs only while it is the visible surface. Under the develop screen or a sheet the view may
+    /// stay in the hierarchy (SwiftUI does not promise `onDisappear` there), and the sensor, the ISP and the
+    /// preview's GPU work would run through the full-resolution develop for nothing.
+    private var cameraCovered: Bool {
+        model.developing != nil || model.showsLaboratory || model.showsSettings
+    }
+
     /// Volume buttons and the Camera Control button photograph only while the camera is the active surface;
     /// under the develop screen or a sheet they keep their system behaviour.
     private var hardwareShutterEnabled: Bool {
-        model.camera.isConfigured && model.developing == nil && !model.showsLaboratory && !model.showsSettings
+        model.camera.canCapture && !cameraCovered
+    }
+
+    /// What keeps the camera from photographing, when something does: an interruption (the session resumes by
+    /// itself when it ends) or an error that stopped it (the user can restart it).
+    private var cameraStatus: (title: String, detail: String?, canRestart: Bool)? {
+        let camera = model.camera
+        if camera.authorizationDenied { return nil }          // has its own message
+        if camera.isInterrupted { return ("camera interrupted", camera.interruption, false) }
+        if !camera.isRunning, let error = camera.sessionError ?? camera.lastError { return ("camera stopped", error, true) }
+        return nil
     }
 
     private var rawBadge: some View {
@@ -109,6 +133,12 @@ struct CameraView: View {
             TCLabel(model.camera.rawKind == .none ? "heif · no raw" : model.camera.rawKind.rawValue, size: 9,
                     color: model.camera.rawKind == .bayer ? Theme.ivory : Theme.ivoryDim, tracking: 2.5)
         }
+    }
+
+    private func badge(_ text: String) -> some View {
+        TCLabel(text, size: 9, color: Theme.ivory, tracking: 2.5)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Capsule().fill(Color.black.opacity(0.45)))
     }
 
     private func preview(size: CGSize) -> some View {
@@ -129,17 +159,35 @@ struct CameraView: View {
                 }
                 .padding(32)
             }
+            if let status = cameraStatus {
+                VStack(spacing: 10) {
+                    TCLabel(status.title, size: 11, color: Theme.ivory)
+                    if let detail = status.detail {
+                        Text(detail).font(Theme.body(13)).foregroundStyle(Theme.ivoryDim).multilineTextAlignment(.center)
+                    }
+                    if status.canRestart {
+                        PillButton(title: "Restart camera") { model.camera.start() }
+                    }
+                }
+                .padding(20)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.6)))
+                .padding(32)
+            }
             if let p = focusPoint, focusVisible {
                 FocusReticle()
                     .position(p)
                     .transition(.opacity)
             }
-            if model.camera.isExposureFocusLocked {
+            if model.camera.isExposureFocusLocked || model.camera.pressure >= .serious {
                 VStack {
                     HStack {
-                        TCLabel("ae · af locked", size: 9, color: Theme.ivory, tracking: 2.5)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                        VStack(alignment: .leading, spacing: 6) {
+                            if model.camera.isExposureFocusLocked { badge("ae · af locked") }
+                            // Heat: the preview sheds work (see PreviewRenderer.systemPressure); photographs are unchanged.
+                            if model.camera.pressure >= .serious {
+                                badge(model.camera.pressure >= .critical ? "hot · plain preview" : "warm · preview slowed")
+                            }
+                        }
                         Spacer()
                     }
                     Spacer()
@@ -221,6 +269,9 @@ struct CameraView: View {
                 .frame(width: 90, alignment: .leading)
             Spacer()
             ShutterButton(isBusy: model.camera.isCapturing) { capture() }
+                // Not while the session is stopped or interrupted: the photograph could not be taken.
+                .allowsHitTesting(model.camera.canCapture)
+                .opacity(model.camera.canCapture ? 1 : 0.4)
             Spacer()
             exposureReadout
                 .frame(width: 90, alignment: .trailing)
@@ -230,22 +281,10 @@ struct CameraView: View {
     }
 
     private var galleryThumb: some View {
-        Button {
+        let newest = model.store.records.first
+        return GalleryThumbButton(record: newest, url: newest.map { model.store.thumbnailURL(for: $0) }) {
             model.screen = .gallery
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06))
-                if let r = model.store.records.first, let ui = UIImage(contentsOfFile: model.store.thumbnailURL(for: r).path) {
-                    Image(uiImage: ui).resizable().scaledToFill()
-                } else {
-                    Image(systemName: "square.grid.3x3").font(.system(size: 14, weight: .light)).foregroundStyle(Theme.ivoryDim)
-                }
-            }
-            .frame(width: 46, height: 46)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ivoryFaint, lineWidth: 1))
         }
-        .buttonStyle(.plain)
     }
 
     private var exposureReadout: some View {
@@ -267,17 +306,16 @@ struct CameraView: View {
     // MARK: - Actions
 
     private func setUp() {
-        if renderer == nil, let r = PreviewRenderer(engine: model.engine) {
-            renderer = r
-            model.camera.frameHandler = { buffer in r.submit(pixelBuffer: buffer) }
-        }
+        if renderer == nil { renderer = model.previewRenderer() }    // the app-lifetime renderer (see AppModel)
         renderer?.parameters = model.parameters   // may have changed in the Laboratory while this view was away
         renderer?.cameraBiasEV = Double(model.camera.exposureBias)
-        model.camera.start()
+        renderer?.systemPressure = model.camera.pressure
+        renderer?.showsLook = showsLook           // this view's toggle starts afresh; the renderer outlives it
+        if !cameraCovered { model.camera.start() }
     }
 
     private func capture() {
-        guard !model.camera.isCapturing else { return }
+        guard model.camera.canCapture, !model.camera.isCapturing else { return }
         Haptics.shutter()
         withAnimation(.easeIn(duration: 0.06)) { flashOverlay = true }
         Task {
@@ -291,6 +329,37 @@ struct CameraView: View {
                 captureError = error.localizedDescription
                 Haptics.error()
             }
+        }
+    }
+}
+
+/// The camera's gallery button, a view of its own: the camera view's body runs on every exposure tick and focus
+/// tap, and it used to read and decode the newest thumbnail on the main thread each time. Here the thumbnail is
+/// loaded once per record change, off the main thread (ThumbnailCache).
+private struct GalleryThumbButton: View {
+    let record: PhotoRecord?
+    let url: URL?
+    let action: () -> Void
+    @State private var image: UIImage?
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06))
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "square.grid.3x3").font(.system(size: 14, weight: .light)).foregroundStyle(Theme.ivoryDim)
+                }
+            }
+            .frame(width: 46, height: 46)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ivoryFaint, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .task(id: record) {
+            guard let url else { image = nil; return }
+            image = await ThumbnailCache.shared.image(at: url, maxPixelSize: 160)   // 46 pt at 3×, with margin
         }
     }
 }
