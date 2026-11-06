@@ -112,7 +112,10 @@ Every pull request compiles the iOS app on a macOS runner and runs the app's own
 simulator: the Core Image/Metal engine is rendered on known scene-linear values and compared pixel by
 pixel with the CPU reference pipeline (worst error 0.0023 in display-linear units), the misregistration
 path is checked on a uniform image, the develop reveal's dye order is checked, and the timing measurement
-is checked against its formula. The Linux job runs the 27 core tests, including parity with the Python
+is checked against its formula. The develop path also runs end to end on two synthetic Bayer DNGs
+(import and labelling, Apple's linear decode, the materialised quick decode, the timing, the full-resolution
+JPEG's size, Display P3 profile and provenance tags, the thumbnail, the pinned decoder version), and the job
+reports, without enforcing it, how many strict-concurrency diagnostics the app would have. The Linux job runs the 27 core tests, including parity with the Python
 prototype and the DNG tag parser; the Python job checks that the committed fixture reproduces from the prototype's defaults.
 
 ## Design
@@ -148,7 +151,9 @@ What has **not** been verified and needs a device:
 * Bayer RAW availability per device/lens, 12 MP vs 48 MP behaviour, and ProRAW fallback.
 * Live-preview performance (Core Image graph on 1080p frames at 30 fps) and full-resolution develop time/memory.
 * The Photos export pairing (print JPEG + DNG as separate assets).
-* Tap-to-focus coordinate mapping with the rotated preview.
+* Tap-to-focus coordinate mapping with the rotated preview (frames are now turned upright in Core Image).
+* The session's handling of interruptions, media-services resets and system pressure, and the lens switch
+  with its rollback (checklist steps 2, 6 and 10).
 * Camera Control: that the exposure slider and the lens picker appear and stay in step with the on-screen
   controls (the session queue is the controls' action queue, as the API requires).
 
