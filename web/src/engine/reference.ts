@@ -33,7 +33,8 @@ export class ReferencePipeline {
     const dye: Vec3 = [0, 0, 0];
     for (let i = 0; i < 3; i++) {
       const light = p.dyeLightEV[i] * Math.log10(2);
-      const d = this.matrices[i].density(-dn[i] + light) * p.dyeGain[i];
+      // Normalised by gain · D max, over which the cube's axis runs: the gain cancels (see ReferencePipeline.swift).
+      const d = this.matrices[i].density(-dn[i] + light);
       dye[i] = Math.min(Math.max(d / p.dyeDMax[i], 0), 1);
     }
     const key = this.key.density(-dn[1]) * p.keyStrength;

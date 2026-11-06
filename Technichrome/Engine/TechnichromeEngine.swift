@@ -86,9 +86,9 @@ public final class TechnichromeEngine: @unchecked Sendable {
     // MARK: - LUT
 
     /// The dye cube for a parameter set, baked on first use and kept. Only the print-model parameters matter
-    /// for the cube, so edits to exposure/curves reuse the cached data; up to four sets of print-model inputs
-    /// keep their cubes at once (say the live preview's and the Laboratory's, or two looks being compared), so
-    /// looks used in turn never re-bake. Safe from any queue, for instance to prewarm a cube in the background:
+    /// for the cube (the dyes, their D max and gains, the base, the lamp), so edits to exposure/curves reuse the
+    /// cached data; up to four sets of print-model inputs keep their cubes at once (say the live preview's and the
+    /// Laboratory's, or two looks being compared), so looks used in turn never re-bake. Safe from any queue, for instance to prewarm a cube in the background:
     /// the bake runs outside the cache's lock, so a caller whose cube is already cached never waits for it.
     public func cubeData(for p: EngineParameters) -> (Data, Int) {
         let cube = cubes.cube(for: p)
@@ -137,13 +137,13 @@ public final class TechnichromeEngine: @unchecked Sendable {
         let matA = CIVector(x: CGFloat(mats[0].a), y: CGFloat(mats[1].a), z: CGFloat(mats[2].a))
         let matVec = CIVector(x: CGFloat(mats[0].logE0), y: CGFloat(mats[0].xHalf), z: CGFloat(mats[0].nu))
         let dmax = CIVector(x: CGFloat(p.dyeDMax[0]), y: CGFloat(p.dyeDMax[1]), z: CGFloat(p.dyeDMax[2]))
-        let gain = CIVector(x: CGFloat(p.dyeGain[0]), y: CGFloat(p.dyeGain[1]), z: CGFloat(p.dyeGain[2]))
+        // No gains for the kernel: the cube's axes span gain · D max of each dye, so they are baked into the cube.
         let l10 = log10(2.0)
         let light = CIVector(x: CGFloat(p.dyeLightEV[0] * l10), y: CGFloat(p.dyeLightEV[1] * l10), z: CGFloat(p.dyeLightEV[2] * l10))
         func row(_ i: Int) -> CIVector { CIVector(x: CGFloat(sep[i, 0]), y: CGFloat(sep[i, 1]), z: CGFloat(sep[i, 2])) }
 
         guard var densities = separateKernel.apply(extent: extent, arguments: [
-            src, glow, bloomAmount, exposureScale, row(0), row(1), row(2), negVec, negShape, matA, matVec, dmax, gain, light, dyeMask.vector
+            src, glow, bloomAmount, exposureScale, row(0), row(1), row(2), negVec, negShape, matA, matVec, dmax, light, dyeMask.vector
         ]) else { return input }
 
         // Silver key image

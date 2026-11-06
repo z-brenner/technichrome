@@ -12,7 +12,9 @@ final class DyeCubeTests: XCTestCase {
         for b in 0..<dimension {
             for g in 0..<dimension {
                 for r in 0..<dimension {
-                    let d = SIMD3(Double(r) / n * p.dyeDMax[0], Double(g) / n * p.dyeDMax[1], Double(b) / n * p.dyeDMax[2])
+                    // Each axis spans gain · D max of its dye.
+                    let d = SIMD3(Double(r) / n * p.dyeDMax[0] * p.dyeGain[0], Double(g) / n * p.dyeDMax[1] * p.dyeGain[1],
+                                  Double(b) / n * p.dyeDMax[2] * p.dyeGain[2])
                     let direct = PrintModel.softClipGamut(model.displayLinear(dyeDensities: d))
                     let baked = lut.entry(r, g, b)
                     for c in 0..<3 { worst = max(worst, abs(baked[c] - direct[c])) }

@@ -29,6 +29,13 @@ def worst_output_error(eng, samples):
     return worst
 
 
+def lab_of_p3(rgb):
+    """CIELAB (D65, white Y = 1) of display-linear Display P3."""
+    t = S.apply_matrix(S.P3_TO_XYZ, np.asarray(rgb, dtype=np.float64)) / (S.P3_TO_XYZ @ np.ones(3))
+    f = np.where(t > 216 / 24389, np.cbrt(t), (24389 / 27 * t + 16) / 116)
+    return np.array([116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])])
+
+
 def check_observer():
     """The observer is the CIE 1931 2° table (CIE 018:2019) at 5 nm from 360 to 830 nm: equal-energy white sits at
     xy (1/3, 1/3) and ȳ integrates to the CIE's sum."""
@@ -72,6 +79,13 @@ def main():
         if y > 0.01:
             assert abs(out[0] - out[1]) / y < 0.12 and abs(out[2] - out[1]) / y < 0.12, f"grey not neutral at {stop}: {out}"
         last = y
+    # 3b. the deepest blacks keep the hue of the shadows: every dye reaches the edge of its cube together (each axis
+    # spans gain · D max), so cyan does not run out first and turn the blacks red (C*ab was 1.4 at 2^-14 when the
+    # cube stopped at D max)
+    for stop in np.arange(-7.0, -14.5, -1.0):
+        g = 2.0 ** stop
+        chroma = float(np.hypot(*lab_of_p3(eng.develop(np.array([[g, g, g]]))[0])[1:]))
+        assert chroma < 1.0, f"black not neutral at {stop}: C*ab {chroma:.2f}"
     red = eng.develop(np.array([[0.42, 0.04, 0.045]]))[0]
     assert red[0] > 2.5 * red[1] and red[0] > 2.5 * red[2], f"red not red: {red}"
     assert red[0] < 0.42, f"red should print darker than the scene (subtractive): {red}"

@@ -29,6 +29,11 @@ public struct ReferencePipeline: Sendable {
     }
 
     /// Scene-linear sRGB-primaries RGB → (normalised dye densities, key density).
+    ///
+    /// Each dye's density, matrix curve × gain, is normalised by gain · D max, the most of that dye the print carries
+    /// (the axes of the dye cube span [0, gain · D max], see LUTBuilder): the gain cancels, so the normalised density
+    /// is the matrix curve over its own D max. Normalised by D max alone, cyan (gain above 1) reached the cube's edge
+    /// first and the deepest blacks turned red.
     public func densities(sceneLinear rgb: SIMD3<Double>) -> (dye: SIMD3<Double>, key: Double) {
         let p = parameters
         let scale = pow(2.0, p.exposureEV)
@@ -41,7 +46,7 @@ public struct ReferencePipeline: Sendable {
         var dye = SIMD3<Double>(repeating: 0)
         for i in 0..<3 {
             let light = p.dyeLightEV[i] * log10(2.0)   // printer light for this matrix, log10 units
-            let d = matrices[i].density(logExposure: logPrint[i] + light) * p.dyeGain[i]
+            let d = matrices[i].density(logExposure: logPrint[i] + light)
             dye[i] = min(max(d / p.dyeDMax[i], 0), 1)
         }
         let k = key.density(logExposure: logPrint.y) * p.keyStrength

@@ -4,6 +4,8 @@
 //
 //  Bakes the spectral print model into a 3D lookup table indexed by normalised dye densities
 //  (cyan → R axis, magenta → G axis, yellow → B axis) and returning gamut-clipped display-linear RGB.
+//  Each axis spans [0, gain · D max] of its dye, the most of it the print carries, so the three dyes reach
+//  the cube's edge together (ReferencePipeline.densities normalises the same way).
 //  Layout matches CIColorCube: RGBA Float32, red (cyan) varying fastest, then green, then blue.
 //
 
@@ -59,11 +61,11 @@ public enum LUTBuilder {
         let model = PrintModel(parameters: p, displaySpace: displaySpace)
         let samples = Spectral.sampleCount
         let n = Double(dimension - 1)
-        /// 10^−(j/n · Dmax · a(λᵢ)) for dye `k`, node j major.
+        /// 10^−(j/n · Dmax · gain · a(λᵢ)) for dye `k`, node j major.
         func transmittances(_ k: Int) -> [Double] {
             var t = [Double](repeating: 0, count: dimension * samples)
             for j in 0..<dimension {
-                let d = Double(j) / n * p.dyeDMax[k]
+                let d = Double(j) / n * p.dyeDMax[k] * p.dyeGain[k]
                 for i in 0..<samples { t[j * samples + i] = pow(10.0, -d * model.absorbances[k][i]) }
             }
             return t

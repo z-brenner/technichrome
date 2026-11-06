@@ -18,12 +18,14 @@ public struct PrintModelKey: Equatable, Sendable {
     public let magenta: DyeSpectrum
     public let yellow: DyeSpectrum
     public let dyeDMax: [Double]
+    /// The cube's axes span gain · D max of each dye, so the gains select the cube too.
+    public let dyeGain: [Double]
     public let printDMin: Double
     public let projectorCCT: Double
 
     public init(_ p: EngineParameters) {
         cyan = p.cyan; magenta = p.magenta; yellow = p.yellow
-        dyeDMax = p.dyeDMax; printDMin = p.printDMin; projectorCCT = p.projectorCCT
+        dyeDMax = p.dyeDMax; dyeGain = p.dyeGain; printDMin = p.printDMin; projectorCCT = p.projectorCCT
     }
 }
 

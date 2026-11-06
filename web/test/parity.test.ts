@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ReferencePipeline } from '../src/engine/reference';
 import { TECHNICHROME_V1, parametersFromJSON, type EngineParameters } from '../src/engine/parameters';
 import { timingExposureEV, geometricMeanLuminance } from '../src/engine/timing';
-import { CMF_TABLE, WAVELENGTHS, dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, xyzOf, SRGB_TO_XYZ, P3_TO_SRGB, SRGB_TO_P3 } from '../src/engine/spectral';
+import { CMF_TABLE, WAVELENGTHS, dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, xyzOf, SRGB_TO_XYZ, P3_TO_SRGB, P3_TO_XYZ, SRGB_TO_P3 } from '../src/engine/spectral';
 import { type DisplaySpace, PrintModel, buildLUT, lookupLUT, softClipGamut } from '../src/engine/printModel';
 
 interface Sample { input: number[]; dye: number[]; key: number; output: number[] }
@@ -63,6 +63,18 @@ describe('parity with the Python prototype', () => {
     expect(red[0]).toBeGreaterThan(red[1] * 2.5);
     expect(red[0]).toBeGreaterThan(red[2] * 2.5);
     expect(red[0]).toBeLessThan(0.42);
+  });
+
+  it('keeps the deepest blacks neutral (every cube axis spans gain · D max, so cyan does not run out first)', () => {
+    const pipe = new ReferencePipeline(TECHNICHROME_V1, 17);
+    const white = mat3.apply(P3_TO_XYZ, [1, 1, 1]);
+    const f = (t: number) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+    for (let stop = -7; stop >= -14; stop--) {
+      const g = Math.pow(2, stop);
+      const xyz = mat3.apply(P3_TO_XYZ, pipe.develop([g, g, g]));
+      const [fx, fy, fz] = [0, 1, 2].map((i) => f(xyz[i] / white[i]));
+      expect(Math.hypot(500 * (fx - fy), 200 * (fy - fz))).toBeLessThan(1.0);
+    }
   });
 
   it('lifts black to the documented 1:64 floor when screen flare is on', () => {
@@ -136,7 +148,8 @@ describe('transfer functions and matrices', () => {
       const n = dim - 1;
       let worst = 0;
       for (let b = 0; b < dim; b++) for (let g = 0; g < dim; g++) for (let r = 0; r < dim; r++) {
-        const direct = softClipGamut(model.displayLinear([r / n * p.dyeDMax[0], g / n * p.dyeDMax[1], b / n * p.dyeDMax[2]]));
+        // Each axis spans gain · D max of its dye.
+        const direct = softClipGamut(model.displayLinear([r / n * p.dyeDMax[0] * p.dyeGain[0], g / n * p.dyeDMax[1] * p.dyeGain[1], b / n * p.dyeDMax[2] * p.dyeGain[2]]));
         const i = ((b * dim + g) * dim + r) * 4;
         for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(lut.data[i + c] - direct[c]));
       }

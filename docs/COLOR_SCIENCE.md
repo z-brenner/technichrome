@@ -69,7 +69,12 @@ display              P3 linear · 10^−Dk, ^surround, soft gamut clip   [8]
 
 Steps 1–5 are analytic per-pixel maths in the Metal kernels. Steps 6–7 are baked into a 33³ lookup
 table indexed by the three normalised dye densities (`LUTBuilder`); the key image is spectrally
-neutral so it factors out as a multiplier after the table. `ReferencePipeline.swift` is the scalar
+neutral so it factors out as a multiplier after the table. Each dye's density Dd_i is normalised by
+gain_i · D max_i, the most of that dye the print carries, so each axis of the table spans
+[0, gain · D max] and the three dyes reach its edge together. Until Round 25 the axes stopped at D max:
+cyan, whose gain is above 1, reached the edge while magenta and yellow still rose, and the deepest
+blacks (scene greys below about 2^−8, under L* 2) lost cyan and turned red, C*ab 1.4 at 2^−14 against
+0.6 now. The gains are therefore part of the table, and changing one re-bakes it. `ReferencePipeline.swift` is the scalar
 specification; `tools/colorscience/tcengine.py` is the prototype; the unit tests check that the two
 agree to 1e-7 on the densities and 1e-6 on the output (they measure about 1e-15 and 1.6e-8, the
 latter the table's float32 storage), on a fixture that covers the shipped look and two variants of it
@@ -83,7 +88,7 @@ on a shared x86 machine (evaluating every node directly took 29 ms and 137 ms on
 used before Round 25). The result is the same to rounding (1.4e-17), and each implementation tests it
 against direct evaluation at every node. The app keeps the cubes of the last four print models it was
 asked for, so the live preview and the Laboratory, or two looks compared in turn, never re-bake; only a
-change to the dyes, their D max, the base density or the lamp does.
+change to the dyes, their D max or gains, the base density or the lamp does.
 
 ### [2] Camera — approximation informed by the documented filters
 

@@ -50,15 +50,17 @@ namespace coreimage {
     }
 
     /// Scene-linear RGB (+ glow) → normalised dye densities. RGB = (cyan, magenta, yellow) in [0,1].
+    /// A dye's density (matrix curve × gain) is normalised by gain · D max, over which the cube's axis runs: the gain
+    /// cancels, so it is the matrix curve over its D max, and the gain is baked into the cube (LUTBuilder).
     ///   sepR/sepG/sepB : rows of the separation matrix (red, green, blue record)
     ///   neg            : (a, logE0, dMin, span) of the negative curve;  negShape: (xHalf, nu)
     ///   matA           : a of each dye's matrix curve (it depends on that dye's D max)
-    ///   mat            : (logE0, xHalf, nu) of the matrix curves, shared;  dyeDMax, dyeGain, dyeLight (log10 units) per dye
+    ///   mat            : (logE0, xHalf, nu) of the matrix curves, shared;  dyeDMax, dyeLight (log10 units) per dye
     ///   dyeMask        : 1 = dye transferred, 0 = matrix withheld (used by the develop reveal)
     float4 tc_separate(sample_t src, sample_t glow, float bloomAmount, float exposureScale,
                        float3 sepR, float3 sepG, float3 sepB,
                        float4 neg, float2 negShape,
-                       float3 matA, float3 mat, float3 dyeDMax, float3 dyeGain, float3 dyeLight, float3 dyeMask)
+                       float3 matA, float3 mat, float3 dyeDMax, float3 dyeLight, float3 dyeMask)
     {
         float3 e = tc_scene_exposure(src.rgb, glow.rgb, bloomAmount, exposureScale);
         float3 s = float3(dot(sepR, e), dot(sepG, e), dot(sepB, e));
@@ -69,9 +71,9 @@ namespace coreimage {
         dn.z = tc_curve(logS.z, neg.x, neg.y, neg.z, neg.w, negShape.x, negShape.y);
         float3 logPrint = -dn + dyeLight;
         float3 dye;
-        dye.x = tc_curve(logPrint.x, matA.x, mat.x, 0.0f, dyeDMax.x, mat.y, mat.z) * dyeGain.x / dyeDMax.x;
-        dye.y = tc_curve(logPrint.y, matA.y, mat.x, 0.0f, dyeDMax.y, mat.y, mat.z) * dyeGain.y / dyeDMax.y;
-        dye.z = tc_curve(logPrint.z, matA.z, mat.x, 0.0f, dyeDMax.z, mat.y, mat.z) * dyeGain.z / dyeDMax.z;
+        dye.x = tc_curve(logPrint.x, matA.x, mat.x, 0.0f, dyeDMax.x, mat.y, mat.z) / dyeDMax.x;
+        dye.y = tc_curve(logPrint.y, matA.y, mat.x, 0.0f, dyeDMax.y, mat.y, mat.z) / dyeDMax.y;
+        dye.z = tc_curve(logPrint.z, matA.z, mat.x, 0.0f, dyeDMax.z, mat.y, mat.z) / dyeDMax.z;
         dye = saturate(dye) * dyeMask;
         return float4(dye, 1.0f);
     }

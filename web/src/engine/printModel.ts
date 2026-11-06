@@ -69,11 +69,11 @@ export function buildLUT(p: EngineParameters, dimension = 33, displaySpace: Disp
   const model = new PrintModel(p, displaySpace);
   const L = SAMPLE_COUNT;
   const n = dimension - 1;
-  const transmittances = (k: number) => {   // 10^−(j/n · Dmax · a(λ)) for dye k, node j major
+  const transmittances = (k: number) => {   // 10^−(j/n · Dmax · gain · a(λ)) for dye k, node j major: each axis spans gain · D max
     const a = model.absorbances[k];
     const t = new Float64Array(dimension * L);
     for (let j = 0; j < dimension; j++) {
-      const d = j / n * p.dyeDMax[k];
+      const d = j / n * p.dyeDMax[k] * p.dyeGain[k];
       for (let i = 0; i < L; i++) t[j * L + i] = Math.pow(10, -d * a[i]);
     }
     return t;

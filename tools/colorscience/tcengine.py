@@ -13,8 +13,10 @@ Pipeline (per pixel, scene-linear sRGB-primaries RGB in, display-linear RGB out)
   8. display             P3/sRGB linear, surround compensation, soft gamut clip
 
 Steps 1–5 are cheap analytic per-pixel maths (they live in the Metal kernels on device);
-steps 6–7 are baked into a 3D LUT indexed by the three normalised dye densities; the key
-image is a neutral density so it factors out as a plain multiplier applied after the LUT.
+steps 6–7 are baked into a 3D LUT indexed by the three normalised dye densities (each dye's
+density over the most of it the print can carry, gain · D max, so every axis of the cube spans
+[0, gain · D max]); the key image is a neutral density so it factors out as a plain multiplier
+applied after the LUT.
 
 Every number in `DEFAULT_PARAMS` is either (a) a documented property of the process, or (b) an
 artistic approximation. The docs/COLOR_SCIENCE.md file states which is which. Nothing here is
@@ -283,11 +285,19 @@ class Engine:
         return rgb
 
     # --- LUT ---------------------------------------------------------------------------------
+    def dye_ceiling(self):
+        """The most of each dye the print carries, gain · D max (absolute peak density): a normalised density of 1.
+        Normalising by D max alone let a gain above 1 (cyan's) reach the cube's edge before the other dyes, so the
+        deepest blacks lost cyan and turned red; with the gain in the ceiling every dye reaches its edge together."""
+        return np.array(self.p.dye_dmax, dtype=np.float64) * np.array(self.p.dye_gain, dtype=np.float64)
+
     def lut_node_densities(self, n):
-        """Absolute dye densities at the nodes of an n³ cube, (n, n, n, 3) indexed [c, m, y]."""
+        """Absolute dye densities at the nodes of an n³ cube, (n, n, n, 3) indexed [c, m, y]: node j of axis i is
+        j/(n−1) · D max_i · gain_i."""
         g = np.linspace(0.0, 1.0, n)
         c, m, y = np.meshgrid(g, g, g, indexing='ij')
-        return np.stack([c * self.p.dye_dmax[0], m * self.p.dye_dmax[1], y * self.p.dye_dmax[2]], axis=-1)
+        p = self.p
+        return np.stack([c * p.dye_dmax[0] * p.dye_gain[0], m * p.dye_dmax[1] * p.dye_gain[1], y * p.dye_dmax[2] * p.dye_gain[2]], axis=-1)
 
     def build_lut(self, n):
         """The cube, factorised per dye: 10^-(Σ d_i a_i(λ) + Dmin) = T_c(λ) T_m(λ) T_y(λ) 10^-Dmin, so three
@@ -295,7 +305,7 @@ class Engine:
         printModel.ts bake the same way). Equal at every node to soft_clip_gamut(display_linear_from_densities(d)),
         which check_prototype.py asserts."""
         g = np.linspace(0.0, 1.0, n)
-        T = [10.0 ** (-np.outer(g * self.p.dye_dmax[i], self.A[i])) for i in range(3)]   # (n, wavelengths) per dye
+        T = [10.0 ** (-np.outer(g * self.p.dye_dmax[i] * self.p.dye_gain[i], self.A[i])) for i in range(3)]   # (n, wavelengths) per dye
         w = (self.P * 10.0 ** (-self.p.print_dmin))[:, None] * S.CMF * self.white_scale   # lamp · base · observer
         xyz = np.einsum('cl,ml,yl,lk->cmyk', T[0], T[1], T[2], w, optimize=True)
         return soft_clip_gamut(S.apply_matrix(self.xyz_to_display, xyz))  # (n, n, n, 3), indexed [c, m, y]
@@ -330,6 +340,7 @@ class Engine:
             gains = gains * (1.0 + 0.6 * e)
             gains = gains / gains.mean()
         self.p.dye_gain = tuple(float(x) for x in gains)
+        self.lut = self.build_lut(self.lut_size)   # the cube spans gain · D max, so it follows the new gains
         return self.p.dye_gain
 
     def calibrate_neutral_lights(self, greys=(0.6, 0.18, 0.05), iterations=16):
@@ -353,7 +364,11 @@ class Engine:
 
         The separation matrix applies to the scene as it is: a negative component only means the colour lies
         outside sRGB (a wide-gamut RAW colour), not that it is impossible. The record exposures, which cannot be
-        negative, are floored before the log; clamping each scene channel first would clip the colour to sRGB."""
+        negative, are floored before the log; clamping each scene channel first would clip the colour to sRGB.
+
+        Each dye's density, matrix curve × gain, is normalised by gain · D max (`dye_ceiling`), the most of that dye
+        the print carries; the gain cancels, so the normalised density is the matrix curve over its own D max, and
+        the gain lives in the cube, whose axes span [0, gain · D max]."""
         p = self.p
         E = np.asarray(rgb_linear, dtype=np.float64) * (2.0 ** p.exposure_ev)
         Ssep = S.apply_matrix(self.M_sep, E)
@@ -361,8 +376,8 @@ class Engine:
         Dn = self.neg.density(log_s)
         log_print = -Dn                                  # printing exposure through the negative
         light = np.array(p.dye_light_ev) * np.log10(2.0)
-        dd = np.stack([self.mats[i].density(log_print[..., i] + light[i]) * p.dye_gain[i] for i in range(3)], axis=-1)
-        norm = dd / np.array(p.dye_dmax)
+        mat = np.stack([self.mats[i].density(log_print[..., i] + light[i]) for i in range(3)], axis=-1)
+        norm = mat / np.array(p.dye_dmax)
         key = self.key.density(log_print[..., 1]) * p.key_strength
         return np.clip(norm, 0.0, 1.0), key
 
@@ -372,7 +387,7 @@ class Engine:
         if use_lut:
             rgb = self.lut_lookup(norm)
         else:
-            rgb = soft_clip_gamut(self.display_linear_from_densities(norm * np.array(self.p.dye_dmax)))
+            rgb = soft_clip_gamut(self.display_linear_from_densities(norm * self.dye_ceiling()))
         rgb = rgb * (10.0 ** (-key))[..., None]
         if self.p.screen_flare > 0:
             f = self.p.screen_flare
