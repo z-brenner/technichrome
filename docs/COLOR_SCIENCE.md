@@ -76,13 +76,14 @@ latter the table's float32 storage), on a fixture that covers the shipped look a
 (three different dye D max; printer lights with screen flare and no key).
 
 **The bake.** The print's transmittance factorises per dye, 10^−(Σ dᵢ·aᵢ(λ) + Dmin) =
-T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so the table is baked from three tables of 33 × 71 transmittances,
-computed once, and every entry is a sum of products rather than 71 powers: 33³ takes about 3 ms in a
-release build of the Swift core and 8 ms in the web page's JavaScript on a shared x86 machine, against
-29 ms and 137 ms for evaluating every node directly. The result is the same to rounding (1.4e-17), and
-each implementation tests it against direct evaluation at every node. The app keeps the cubes of the
-last four print models it was asked for, so the live preview and the Laboratory, or two looks compared
-in turn, never re-bake; only a change to the dyes, their D max, the base density or the lamp does.
+T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so the table is baked from three tables of 33 × 95 transmittances
+(one per node and wavelength), computed once, and every entry is a sum of products rather than 95
+powers: 33³ takes about 4 ms in a release build of the Swift core and 9 ms in the web page's JavaScript
+on a shared x86 machine (evaluating every node directly took 29 ms and 137 ms on the 71-wavelength grid
+used before Round 25). The result is the same to rounding (1.4e-17), and each implementation tests it
+against direct evaluation at every node. The app keeps the cubes of the last four print models it was
+asked for, so the live preview and the Laboratory, or two looks compared in turn, never re-bake; only a
+change to the dyes, their D max, the base density or the lamp does.
 
 ### [2] Camera — approximation informed by the documented filters
 
@@ -133,7 +134,7 @@ had: per-matrix **printer lights** (an exposure shift of each matrix curve, in s
 **contrast** (a density multiplier, Technicolor's "colour control"). Balanced with lights alone, this
 model reproduces the classic crossover — cyan highlights and reddish shadows — that period sources
 describe as blacks with unwanted hues; so the shipped preset is balanced with the contrast multipliers
-(`calibrate_neutral`: 1.196 / 0.915 / 0.888 for the chosen dyes) and the lights sit at zero, available
+(`calibrate_neutral`: 1.202 / 0.909 / 0.889 for the chosen dyes) and the lights sit at zero, available
 in the Laboratory.
 
 The key image is on by default at 0.15 of the documented "50 %" strength — enough to deepen blacks
@@ -176,9 +177,11 @@ magenta plus full yellow and no cyan — that Ball describes.
 ### [7] Projection — approximation
 
 The lamp is a 5400 K Planckian radiator (carbon arcs were close to daylight; the exact figure varies
-by carbon trim). The eye is assumed adapted to the screen white (projector through the clear base),
-so the print white is mapped to the display white with a Bradford transform. After adaptation the
-lamp's colour only produces second-order interactions with the dyes.
+by carbon trim). The eye is the CIE 1931 2° standard observer, as tabulated by the CIE (CIE 018:2019)
+at 5 nm from 360 to 830 nm, so equal-energy white integrates to xy (0.33331, 0.33329). It is assumed
+adapted to the screen white (projector through the clear base), so the print white is mapped to the
+display white with a Bradford transform. After adaptation the lamp's colour only produces second-order
+interactions with the dyes.
 
 **Screen flare — a documented figure, off by default.** Ball gives the projected contrast "from
 whitest white to blackest black" as "about 1 to 64": the print's own density, the projector's stray
@@ -238,8 +241,12 @@ exponent (0.92) is applied — a small nod to Bartleson–Breneman, not a full a
 * Wikipedia, "Technicolor" and "Dye-transfer process".
 * R. W. G. Hunt, *The Reproduction of Colour* (dye unwanted absorptions, subtractive reproduction).
 * Apple, *CIRAWFilter* documentation; WWDC21 session 10160; *Capturing photos in RAW and Apple ProRAW formats*.
-* C. Wyman, P.-P. Sloan, P. Shirley, "Simple Analytic Approximations to the CIE XYZ Color Matching
-  Functions", JCGT 2(2), 2013 (observer curves used in the spectral integration).
+* CIE 2019, "Colour-matching functions of CIE 1931 standard colorimetric observer", International
+  Commission on Illumination, Vienna, DOI 10.25039/CIE.DS.xvudnb9b (CIE 018:2019, Table 6; CC BY-SA 4.0):
+  the observer used in the spectral integration, its 1 nm table taken at every 5 nm from 360 to 830 nm.
+  Until Round 25 the engine used the analytic fit of C. Wyman, P.-P. Sloan, P. Shirley, "Simple Analytic
+  Approximations to the CIE XYZ Color Matching Functions", JCGT 2(2), 2013, over 380–730 nm; that fit is
+  off the table by up to 1.4 % of peak (x̄ at 631 nm), and ISO/CIE 11664-3 asks for at least 380–780 nm.
 
 ## Figures
 

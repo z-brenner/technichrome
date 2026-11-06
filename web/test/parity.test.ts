@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ReferencePipeline } from '../src/engine/reference';
 import { TECHNICHROME_V1, parametersFromJSON, type EngineParameters } from '../src/engine/parameters';
 import { timingExposureEV, geometricMeanLuminance } from '../src/engine/timing';
-import { dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, SRGB_TO_XYZ, P3_TO_SRGB, SRGB_TO_P3 } from '../src/engine/spectral';
+import { CMF_TABLE, WAVELENGTHS, dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, xyzOf, SRGB_TO_XYZ, P3_TO_SRGB, SRGB_TO_P3 } from '../src/engine/spectral';
 import { type DisplaySpace, PrintModel, buildLUT, lookupLUT, softClipGamut } from '../src/engine/printModel';
 
 interface Sample { input: number[]; dye: number[]; key: number; output: number[] }
@@ -88,6 +88,19 @@ describe('print timing', () => {
   it('computes a geometric mean of luminance', () => {
     const buf = new Float32Array([0.04, 0.04, 0.04, 1, 1, 1]);
     expect(geometricMeanLuminance(buf, 2, 1, 1, 1)).toBeCloseTo(0.2, 6);
+  });
+});
+
+describe('the observer', () => {
+  it('is the CIE 1931 2° table: equal-energy white at xy (1/3, 1/3), ȳ summing to the CIE value', () => {
+    expect(WAVELENGTHS.length).toBe(95);
+    expect([WAVELENGTHS[0], WAVELENGTHS[94]]).toEqual([360, 830]);
+    expect(CMF_TABLE.length).toBe(WAVELENGTHS.length);
+    const [x, y, z] = xyzOf(new Array<number>(WAVELENGTHS.length).fill(1));
+    expect(Math.abs(x / (x + y + z) - 1 / 3)).toBeLessThan(1e-4);
+    expect(Math.abs(y / (x + y + z) - 1 / 3)).toBeLessThan(1e-4);
+    expect(Math.abs(y * 5 - 106.857)).toBeLessThan(0.01);
+    expect(CMF_TABLE[39]).toEqual([0.5120501, 1.0, 0.005749999]);   // 555 nm, as the CIE publishes it
   });
 });
 

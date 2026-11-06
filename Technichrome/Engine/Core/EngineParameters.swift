@@ -219,7 +219,7 @@ public struct EngineParameters: Codable, Equatable, Sendable {
                            0.0398, 0.0864, 0.8738],
         negative: CurveParameters(dMin: 0.12, dMax: 2.2, gamma: 0.4500, logE0: -1.0539, nu: 0.2001),
         dyeDMax: [2.8, 2.8, 2.8],
-        dyeGain: [1.1963, 0.9153, 0.8884],
+        dyeGain: [1.2022, 0.9087, 0.8892],
         dyeLightEV: [0.0000, 0.0000, 0.0000],
         matrixGamma: 3.2176, matrixLogE0: -1.0621, matrixNu: 0.0253,
         keyStrength: 0.15,

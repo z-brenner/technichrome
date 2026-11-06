@@ -50,10 +50,11 @@ public enum LUTBuilder {
     ///
     /// The print's transmittance factorises per dye, 10^−(d_c·a_c(λ) + d_m·a_m(λ) + d_y·a_y(λ) + Dmin) =
     /// T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so three tables of `dimension` × wavelengths transmittances are computed
-    /// once and every entry is a sum of products: 3·dimension·71 `pow` calls instead of 71·dimension³. The
+    /// once and every entry is a sum of products: 3·dimension·95 `pow` calls instead of 95·dimension³. The
     /// result equals `PrintModel.displayLinear` + `softClipGamut` evaluated at every node (the core tests check
-    /// it to 1e-6). Measured in a release build on a shared x86 Linux machine, not on a phone: 33³ in about 3 ms
-    /// and 65³ in about 23 ms, where evaluating every node directly took about 29 ms and 250 ms.
+    /// it to 1e-6). Measured in a release build on a shared x86 Linux machine, not on a phone: 33³ in about 4 ms
+    /// and 65³ in about 36 ms (95 wavelengths), where evaluating every node directly took about 29 ms and 250 ms
+    /// on the 71-wavelength grid used before Round 25.
     public static func build(parameters p: EngineParameters, dimension: Int = 33, displaySpace: PrintModel.DisplaySpace = .displayP3) -> DyeLUT {
         let model = PrintModel(parameters: p, displaySpace: displaySpace)
         let samples = Spectral.sampleCount

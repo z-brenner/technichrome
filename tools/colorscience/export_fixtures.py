@@ -2,9 +2,10 @@
 (inputs → dye densities, key density, outputs) so the Swift unit tests can verify the port: one block for the
 shipped look and one for each parameter variant in VARIANTS, on the same inputs.
 
-usage: python3 export_fixtures.py ../../Tests/TechnichromeCoreTests/Fixtures/parity.json
+usage: python3 export_fixtures.py ../../Tests/TechnichromeCoreTests/Fixtures/parity.json [--web ../../web/src/engine]
+       (--web also writes the shipped look as technichromeV1.json for the web version)
 """
-import sys, json
+import sys, os, json
 import numpy as np
 import tcengine as T
 
@@ -108,8 +109,13 @@ if __name__ == '__main__':
         ve = variant_engine(overrides)
         variants.append({"name": name, "parameters": params_to_swift_json(ve, name=variant_name(name)), "samples": fixture_samples(ve, inputs)})
     fixture = {"parameters": params_to_swift_json(eng), "lutDimension": 17, "displaySpace": eng.p.display, "samples": samples, "variants": variants}
-    path = sys.argv[1] if len(sys.argv) > 1 else 'parity.json'
+    path = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else 'parity.json'
     json.dump(fixture, open(path, 'w'), indent=1)
     print('wrote', path, len(samples), 'samples for the shipped look and for each of', len(variants), 'variants')
+    if '--web' in sys.argv:
+        web = sys.argv[sys.argv.index('--web') + 1]
+        with open(os.path.join(web, 'technichromeV1.json'), 'w') as f:
+            json.dump(fixture['parameters'], f, indent=1)
+        print('wrote', os.path.join(web, 'technichromeV1.json'))
     if '--swift' in sys.argv:
         print(swift_literal(eng))

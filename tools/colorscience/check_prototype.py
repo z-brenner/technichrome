@@ -29,7 +29,20 @@ def worst_output_error(eng, samples):
     return worst
 
 
+def check_observer():
+    """The observer is the CIE 1931 2° table (CIE 018:2019) at 5 nm from 360 to 830 nm: equal-energy white sits at
+    xy (1/3, 1/3) and ȳ integrates to the CIE's sum."""
+    assert S.LAMBDA[0] == 360.0 and S.LAMBDA[-1] == 830.0 and len(S.LAMBDA) == 95 == len(S.CMF)
+    xyz = S.CMF.sum(axis=0)
+    x, y = xyz[0] / xyz.sum(), xyz[1] / xyz.sum()
+    assert abs(x - 1 / 3) < 1e-4 and abs(y - 1 / 3) < 1e-4, f"equal-energy white at xy ({x:.5f}, {y:.5f})"
+    assert abs(xyz[1] * 5.0 - 106.857) < 0.01, xyz[1] * 5.0
+    assert tuple(S.CMF[39]) == (0.5120501, 1.0, 0.005749999), "555 nm row"
+    return x, y
+
+
 def main():
+    ee = check_observer()
     eng = T.Engine(lut_size=17)
     fx = json.load(open(FIXTURE))
     # 1. parameters in the fixture == current defaults (and the variants == the defaults with their overrides)
@@ -76,7 +89,7 @@ def main():
     w = ef.develop(np.array([[4.0, 4.0, 4.0]]))[0]
     assert b.min() > (1.0 / 65.0) ** pf.surround_exponent * 0.98, f"flare floor missing: {b}"
     assert w.min() > 0.9, f"flare must not dim white: {w}"
-    print(f"prototype OK: fixture reproduced (max err {worst:.2e}), invariants hold")
+    print(f"prototype OK: fixture reproduced (max err {worst:.2e}), invariants hold, equal-energy white at xy ({ee[0]:.5f}, {ee[1]:.5f})")
 
 
 if __name__ == '__main__':

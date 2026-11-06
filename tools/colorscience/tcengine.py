@@ -206,7 +206,7 @@ class EngineParams:
     # greys print neutral through the whole scale, plus printer lights (stops) that shift each matrix curve.
     # Lights alone cannot neutralise every grey level: balanced by lights only, this model shows the classic
     # crossover (cyan highlights, red shadows) that period sources describe as blacks with unwanted hues.
-    dye_gain: tuple = (1.1963, 0.9153, 0.8884)
+    dye_gain: tuple = (1.2022, 0.9087, 0.8892)
     dye_light_ev: tuple = (0.0, 0.0, 0.0)
     mat_gamma: float = 3.2176
     mat_log_e0: float = -1.0621# log10 printing exposure at half density
