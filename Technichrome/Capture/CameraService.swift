@@ -668,6 +668,9 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
         let formats = photoOutput.availableRawPhotoPixelFormatTypes
         if formats.contains(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) {
+            // Back from a lens that needed ProRAW: switch it off, so the pipeline is not left in its ProRAW
+            // configuration while Bayer RAW is captured (and the Settings facts say what is in use).
+            if photoOutput.isAppleProRAWEnabled { photoOutput.isAppleProRAWEnabled = false }
             lastConfiguration.rawKind = .bayer
         } else if photoOutput.isAppleProRAWSupported {
             photoOutput.isAppleProRAWEnabled = true
