@@ -4,7 +4,8 @@
 //
 //  Live preview: camera frames → Technichrome engine → Metal view. The video frames are
 //  display-referred (Apple's own tone mapping), so this is an approximation of the print; the
-//  developed photograph is rendered from the RAW data. Rendering is paced by the display.
+//  developed photograph is rendered from the RAW data. Rendering is paced by the camera: a frame is
+//  drawn when one arrives.
 //
 
 import Foundation
@@ -25,16 +26,25 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     private var latest: CIImage?
     nonisolated private let frameLock = NSLock()
     nonisolated(unsafe) private var pendingFrame: CIImage?
-    var parameters: EngineParameters = .default { didSet { if parameters != oldValue { dirty = true } } }
-    var exposureEV: Double = 0 { didSet { dirty = true } }
+    /// A draw is queued on the main queue and has not run yet; guarded by `frameLock` (see requestDraw).
+    nonisolated(unsafe) private var drawPending = false
+    /// The view being drawn: `makeView` makes a new one each time the camera view appears.
+    private weak var view: MTKView?
+    var parameters: EngineParameters = .default { didSet { if parameters != oldValue { invalidate() } } }
+    var exposureEV: Double = 0 { didSet { invalidate() } }
     /// The photographer's exposure compensation, excluded from the preview's print timing like the develop step's.
     var cameraBiasEV: Double = 0
-    var showsLook = true { didSet { dirty = true } }
+    var showsLook = true { didSet { invalidate() } }
+    /// The camera's system pressure. The preview's own cost is shed first: from `.serious` the timing
+    /// measurement pauses, from `.critical` the preview is plain (photographs are still developed with the look).
+    var systemPressure: CameraPressure = .nominal { didSet { if systemPressure != oldValue { invalidate() } } }
     /// Print timing for the preview: measured about twice a second from the frames and smoothed, so the
     /// preview predicts the timed print rather than the untimed one.
     private(set) var previewTimingEV: Double = 0
+    /// A timing measurement is on the GPU (see startPreviewTimingMeasurement).
+    private var timingInFlight = false
     private var frameCounter = 0
-    /// Set when a new frame, parameter or size requires a redraw; the view ticks at 30 fps regardless.
+    /// Set when a new frame, parameter or size requires a redraw.
     private var dirty = true
     private var lastDrawableSize: CGSize = .zero
     /// Rendered image rect in view points (for tap-to-focus mapping).
@@ -54,24 +64,67 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         v.delegate = self
         v.framebufferOnly = false
         v.colorPixelFormat = .bgra8Unorm
-        v.isPaused = false
+        // Explicit drawing (MTKView: paused, no setNeedsDisplay, call `draw()`): a frame is drawn when the camera
+        // delivers one or a parameter changes, not on a display timer that is not phase-locked to the camera
+        // (which gave a variable latency and dropped or doubled frames). A stopped camera draws nothing.
+        v.isPaused = true
         v.enableSetNeedsDisplay = false
-        v.preferredFramesPerSecond = 30
         v.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         v.backgroundColor = .black
         if let layer = v.layer as? CAMetalLayer {
             layer.colorspace = TechnichromeEngine.outputColorSpace
         }
+        view = v
+        dirty = true
         return v
+    }
+
+    /// A parameter changed: draw the last frame again, even with the camera stopped.
+    private func invalidate() {
+        dirty = true
+        requestDraw()
+    }
+
+    /// Asks for one draw on the main queue. Requests made before it runs (frames arriving faster than the main
+    /// thread draws, parameter changes) are coalesced into it, and it draws the newest frame.
+    nonisolated private func requestDraw() {
+        frameLock.lock()
+        let schedule = !drawPending
+        drawPending = true
+        frameLock.unlock()
+        guard schedule else { return }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.performRequestedDraw() }
+        }
+    }
+
+    private func performRequestedDraw() {
+        frameLock.lock(); drawPending = false; frameLock.unlock()
+        view?.draw()                      // calls draw(in:) synchronously
+    }
+
+    /// Drops the last camera frame, and the pixel buffer it holds, while the camera view is away: the renderer
+    /// lives as long as the app (AppModel.previewRenderer).
+    func releaseFrame() {
+        frameLock.lock(); pendingFrame = nil; frameLock.unlock()
+        latest = nil
     }
 
     /// Called on the video queue.
     nonisolated func submit(pixelBuffer: CVPixelBuffer) {
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        // The buffers arrive in the sensor's native landscape orientation (the video connection's angle is 0).
+        // The interface is portrait only and the cameras are back cameras, so every frame is turned 90°
+        // clockwise, whatever the phone's orientation, exactly as the connection's angle of 90 did before:
+        // `.right` is the orientation iOS records for a portrait photograph from the same native data
+        // (CGImagePropertyOrientation), and `oriented` applies the rotation that displays it upright.
+        let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
         frameLock.lock(); pendingFrame = image; frameLock.unlock()
+        requestDraw()
     }
 
-    nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        requestDraw()                     // render() notices the new size
+    }
 
     nonisolated func draw(in view: MTKView) {
         // MTKView calls its delegate on the main thread.
@@ -82,8 +135,7 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         frameLock.lock(); let frame = pendingFrame; pendingFrame = nil; frameLock.unlock()
         if let frame { latest = frame; dirty = true }
         if view.drawableSize != lastDrawableSize { lastDrawableSize = view.drawableSize; dirty = true }
-        guard dirty, let source = latest, let drawable = view.currentDrawable, let buffer = commandQueue.makeCommandBuffer() else { return }
-        dirty = false
+        guard dirty, let source = latest else { return }
 
         // Aspect-fit into the drawable. The frame is scaled down *before* the engine runs: the camera can
         // deliver frames far larger than the screen, and the per-pixel maths costs the same for every pixel.
@@ -95,12 +147,11 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         var image = preScale < 1
             ? source.transformed(by: CGAffineTransform(scaleX: preScale, y: preScale), highQualityDownsample: true)
             : source
-        if showsLook, let engine {
+        if showsLook, systemPressure < .critical, let engine {
             frameCounter &+= 1
             if parameters.timingStrength > 0 {
-                if frameCounter % 12 == 1 {
-                    let measured = measurePreviewTiming(of: image, engine: engine)
-                    previewTimingEV += 0.35 * (measured - previewTimingEV)   // settles within about a second
+                if frameCounter % 12 == 1, systemPressure < .serious {
+                    startPreviewTimingMeasurement(of: image, engine: engine)
                 }
             } else {
                 previewTimingEV = 0
@@ -119,6 +170,10 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         let pointScale = view.contentScaleFactor > 0 ? view.contentScaleFactor : 1
         imageRect = CGRect(x: ox / pointScale, y: (dsize.height - oy - h) / pointScale, width: w / pointScale, height: h / pointScale)
 
+        // The drawable is obtained as late as possible, once the graph is built: `currentDrawable` can block the
+        // main thread while every drawable is in flight.
+        guard let drawable = view.currentDrawable, let buffer = commandQueue.makeCommandBuffer() else { return }
+        dirty = false
         let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: buffer)
         destination.colorSpace = TechnichromeEngine.outputColorSpace
         destination.alphaMode = .none
@@ -133,18 +188,51 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     }
 
     /// Print timing measured the way the develop step measures it: geometric-mean luminance after the engine's
-    /// fixed exposure, with the photographer's exposure compensation taken out. One 1×1 readback per call.
-    private func measurePreviewTiming(of image: CIImage, engine: TechnichromeEngine) -> Double {
-        let scale = TechnichromeEngine.exposureScale(parameters: parameters, baselineEV: 0)
+    /// fixed exposure, with the photographer's exposure compensation taken out (a mean of logs at preview size;
+    /// downscaling first would bias the geometric mean).
+    ///
+    /// The 1×1 readback is asynchronous: the render is queued on the GPU here, waited for on a utility queue,
+    /// and the result reaches the main actor a frame or two later, which the smoothing absorbs. A synchronous
+    /// readback made the main thread wait for the GPU every 12 frames. One measurement at a time.
+    private func startPreviewTimingMeasurement(of image: CIImage, engine: TechnichromeEngine) {
+        guard !timingInFlight else { return }
+        let p = parameters
+        let bias = cameraBiasEV
         let average = CIFilter.areaAverage()
-        average.inputImage = engine.makeLogLuminance(from: image, exposureScale: scale)
+        average.inputImage = engine.makeLogLuminance(from: image, exposureScale: TechnichromeEngine.exposureScale(parameters: p, baselineEV: 0))
         average.extent = image.extent
-        guard let out = average.outputImage else { return previewTimingEV }
-        var pixel = [Float](repeating: 0, count: 4)
-        context.render(out, toBitmap: &pixel, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
-        guard pixel[0].isFinite else { return previewTimingEV }
-        return PrintTiming.exposureEV(geometricMeanLuminance: pow(2.0, Double(pixel[0])), target: parameters.timingTarget,
-                                      strength: parameters.timingStrength, limit: parameters.timingLimit, cameraBiasEV: cameraBiasEV)
+        guard let out = average.outputImage, !out.extent.isInfinite else { return }
+        let pixel = UnsafeMutablePointer<Float>.allocate(capacity: 4)
+        pixel.initialize(repeating: .nan, count: 4)
+        let destination = CIRenderDestination(bitmapData: pixel, width: 1, height: 1, bytesPerRow: 16, format: .RGBAf)
+        // The working space itself, so the log values come back unconverted, negative ones included.
+        destination.colorSpace = TechnichromeEngine.workingColorSpace
+        let task: CIRenderTask
+        do {
+            task = try context.startTask(toRender: out, from: CGRect(origin: out.extent.origin, size: CGSize(width: 1, height: 1)),
+                                         to: destination, at: .zero)
+        } catch {
+            pixel.deallocate()
+            return
+        }
+        timingInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let logMean: Double = withExtendedLifetime(destination) {
+                (try? task.waitUntilCompleted()) != nil ? Double(pixel[0]) : .nan
+            }
+            pixel.deallocate()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.finishPreviewTiming(logMean: logMean, parameters: p, cameraBiasEV: bias) }
+            }
+        }
+    }
+
+    private func finishPreviewTiming(logMean: Double, parameters p: EngineParameters, cameraBiasEV bias: Double) {
+        timingInFlight = false
+        guard logMean.isFinite, parameters.timingStrength > 0 else { return }
+        let measured = PrintTiming.exposureEV(geometricMeanLuminance: pow(2.0, logMean), target: p.timingTarget,
+                                              strength: p.timingStrength, limit: p.timingLimit, cameraBiasEV: bias)
+        previewTimingEV += 0.35 * (measured - previewTimingEV)   // settles within about a second
     }
 
     /// Maps a tap in view points to AVFoundation device coordinates (0…1, landscape sensor frame).
@@ -153,7 +241,8 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         let nx = (p.x - imageRect.minX) / imageRect.width
         let ny = (p.y - imageRect.minY) / imageRect.height
         guard (0...1).contains(nx), (0...1).contains(ny) else { return nil }
-        // Preview frames are rotated 90° (portrait); the sensor's x axis runs down the screen.
+        // The displayed frame is the native frame turned 90° clockwise (see submit); the sensor's x axis runs
+        // down the screen.
         return CGPoint(x: ny, y: 1 - nx)
     }
 }

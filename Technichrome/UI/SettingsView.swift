@@ -36,21 +36,16 @@ struct SettingsView: View {
                                 Text(fact.value).font(Theme.mono(11)).multilineTextAlignment(.trailing)
                             }
                         }
-                    }
-                } header: {
-                    Text("Camera on this iPhone")
-                } footer: {
-                    Text("For the current lens: the RAW formats on offer, the photo sizes, the preview stream's colour space and HDR state, and whether the Camera Control button is present. See docs/HARDWARE_CHECKLIST.md.")
-                }
-                Section {
-                    if model.camera.facts.isEmpty {
-                        Text("Open the camera first. This lists what the camera system reported on this iPhone.")
-                            .font(Theme.body(13)).foregroundStyle(Theme.ivoryDim)
-                    } else {
-                        ForEach(model.camera.facts) { fact in
-                            LabeledContent(fact.label) {
-                                Text(fact.value).font(Theme.mono(11)).multilineTextAlignment(.trailing)
-                            }
+                        // The session's observed state, for the interruption and heat checks of the checklist.
+                        LabeledContent("Session") {
+                            Text(model.camera.isInterrupted ? "interrupted" : (model.camera.isRunning ? "running" : "stopped"))
+                                .font(Theme.mono(11))
+                        }
+                        LabeledContent("System pressure") {
+                            Text(model.camera.pressure.label).font(Theme.mono(11))
+                        }
+                        LabeledContent("Last interruption") {
+                            Text(model.camera.lastInterruption ?? "none since launch").font(Theme.mono(11)).multilineTextAlignment(.trailing)
                         }
                     }
                 } header: {
@@ -62,6 +57,9 @@ struct SettingsView: View {
                     LabeledContent("Engine", value: model.engine == nil ? "unavailable" : "Core Image + Metal kernels")
                     LabeledContent("Look", value: model.parameters.name)
                     LabeledContent("Photographs", value: "\(model.store.records.count)")
+                    // The CIRAWFilter decoder of the newest RAW develop (each record keeps its own; see the photo info).
+                    LabeledContent("RAW decoder", value: model.store.records.first(where: { $0.decoderVersion != nil })?.decoderVersion
+                                   ?? "no RAW developed yet")
                     Button(testing ? "Testing the engine…" : "Run engine self-test") { runSelfTest() }
                         .disabled(testing || model.engine == nil)
                     if let selfTest {

@@ -27,18 +27,35 @@ photos. They're still scene-referred"); WWDC21 session 10160.
 2. After the photo output is attached, `availableRawPhotoPixelFormatTypes` is filtered with
    `AVCapturePhotoOutput.isBayerRAWPixelFormat(_:)`. If a Bayer format exists it is used.
    Only when none exists and `isAppleProRAWSupported` is true is `isAppleProRAWEnabled` switched on
-   (before `startRunning()`, as Apple recommends) and the ProRAW format used.
+   (before `startRunning()`, as Apple recommends) and the ProRAW format used. Back on a lens with a Bayer
+   format, ProRAW is switched off again, so the pipeline is not left in its ProRAW configuration.
 3. `videoZoomFactor` is pinned to 1.0 (Bayer RAW throws with digital zoom).
 4. `maxPhotoDimensions` is set to the 12 MP size by default — the size every lens offers to Bayer RAW and the
    binned readout of 48 MP sensors — or to the largest size the format offers when *Request full sensor
-   resolution* is on in Settings. Whether Bayer RAW is delivered at 48 MP, or only ProRAW and HEIF, is
+   resolution* is on in Settings. It is chosen after the configuration is committed, from the active
+   format (Apple: the size must be one of the *current* active format's), next to the RAW policy and before
+   `startRunning()` on the first start. Whether Bayer RAW is delivered at 48 MP, or only ProRAW and HEIF, is
    untested; the Settings diagnostics show what was asked for.
+   A lens change is one configuration of the running session: the new input is made first, the old one is
+   removed, and it is put back if the session refuses the new one (Apple's AVCam does the same), so the
+   session is never left without a camera.
 5. `AVCapturePhotoSettings(rawPixelFormatType:processedFormat:)` requests the RAW plus an HEVC companion.
    The companion is Apple's rendering; it is stored only so the Laboratory can compare the Technichrome
    print against it (hold the image). It never feeds the engine.
 6. `AVCapturePhoto.fileDataRepresentation()` on the RAW photo returns a DNG, written untouched to the
    photo's folder as `original.dng`. The DNG is the preserved original; it can be shared from the app
    or saved to Photos next to the print.
+
+The session's state is observed, not assumed: its running and interrupted flags (KVO), its runtime-error
+and interruption notifications, and the device's system-pressure level. A media-services reset restarts
+the session once per start, and only if the camera is meant to be running; other errors and interruptions
+are shown over the preview and the shutter waits. From `.serious` pressure the preview stream is throttled
+to 15–20 fps (Apple's recommendation and AVCam's values) and from `.critical` the preview is drawn plain;
+photographs are unaffected. The camera is stopped while the develop screen or a sheet covers it.
+
+The live preview receives frames in the sensor's native orientation (the video connection's rotation
+angle is 0, as Apple advises for apps that rotate buffers themselves) and turns them upright in Core Image
+with `oriented(.right)`, the rotation the connection used to apply to every buffer.
 
 ## Importing files (PhotoImporter.swift, DNGInspector.swift)
 
@@ -48,13 +65,16 @@ tags, read by a small TIFF/DNG parser (`DNGInspector`, unit-tested on Linux): th
 RAW** — or 34892 (linear, already demosaiced) — labelled **Apple ProRAW** when the maker tags say Apple,
 **Linear DNG** otherwise. A DNG of either kind goes through the same linear decoder as a capture. Any
 other image (HEIF, JPEG, TIFF) is accepted too and developed as display-referred data, like the HEIF
-fallback of a capture, and the record says so.
+fallback of a capture, and the record says so. A file from Files is mapped for the inspection and copied by
+the file system, never read whole into memory; one from Photos still arrives as data.
 
 ## What the print carries
 
 The developed JPEG carries the original's camera, exposure, lens and date EXIF tags and a
 `Software = Technichrome` tag, so Photos shows the provenance of the print. Location tags are never
-copied; orientation is not copied either, because the print is rendered upright.
+copied; orientation is not copied either, because the print is rendered upright. The simulator test
+`DevelopEndToEndTests` checks this on the synthetic DNGs (the Software and camera-model tags, no GPS, no
+orientation, a Display P3 profile), along with the print's size and the thumbnail's.
 
 ## Linear decode (RAWDeveloper.swift)
 
@@ -73,6 +93,8 @@ Every stage that imposes a *look* is disabled:
 | `sharpnessAmount`, `detailAmount` | 0 | Texture comes from the model: diffused dye layers, sharp silver key. |
 | `colorNoiseReductionAmount` | 0.6 | Chroma noise would print as coloured dye grain after the matrix contrast; dye-transfer prints are grainless. |
 | `luminanceNoiseReductionAmount` | 0.25 | Mild. |
+| `isHighlightRecoveryEnabled` | true | Set explicitly where the filter offers it (iOS 26 and later, in an app built with the iOS 26 SDK) instead of left at an undocumented default; elsewhere the decoder's default applies. Recorded with the print; whether it should stay on is a hardware measurement (checklist step 11). |
+| `decoderVersion` | the record's | Set first. A new filter uses the newest decoder on the running iOS, and an update may change demosaic or noise reduction; a re-develop asks for the version the print was developed with, if `supportedDecoderVersions` still holds it (any other gives a nil image), and the record stores the version used. |
 
 The Core Image context runs with `workingColorSpace = extendedLinearSRGB` and `workingFormat = RGBAh`,
 so the engine's kernels receive scene-linear values with sRGB primaries, unclipped above 1.0 and
@@ -85,10 +107,15 @@ engine maths, so the look can be judged on real iPhone DNGs without a device.
 ## Memory and resolution
 
 Core Image tiles large images automatically, so a 12 MP Bayer develop and a 48 MP ProRAW develop
-share one code path. Quick previews use `scaleFactor = 0.25` and draft mode. Full-resolution output is
-streamed to the JPEG with `CIContext.writeJPEGRepresentation` (Display P3, the provenance tags attached
-to the image), so the whole print is never held in memory; the gallery thumbnail and the display image
-are then decoded from that file at reduced size by ImageIO.
+share one code path. Quick previews use `scaleFactor = 0.25` (at most a 1024 px long edge) and draft
+mode, and are rendered once into a half-float buffer in the working space: a decoder image is a recipe,
+so the develop reveal and every Laboratory slider movement would otherwise run demosaic and noise
+reduction again. Full-resolution output is streamed to the JPEG with `CIContext.writeJPEGRepresentation`
+(Display P3, the provenance tags attached to the image), on a context of its own at low GPU priority so
+the interface keeps its frame rate; whether the whole print is really never held in memory is Apple's
+undocumented behaviour, unmeasured. The gallery thumbnail and the display image are then decoded from
+that file at reduced size by ImageIO, and the detail screen decodes the print at most 4096 px wide, off
+the main thread.
 
 ## Exposure
 
@@ -100,6 +127,9 @@ toward a target key, partially and clamped, with the photographer's exposure com
 the correction; see `docs/COLOR_SCIENCE.md`). That step absorbs most of the
 systematic difference between the camera's RAW placement and the LibRaw path used for tuning; the
 remaining constant offset, if any, has to be calibrated on hardware (see "Untested" in README.md).
+The timing is measured on the quick decode with the parameters of the develop. In the Laboratory it is
+kept while the parameters it depends on (print exposure, timing strength, target and limit) are those,
+and measured again when they move; a re-develop stores the value it used.
 
 Noise reduction in the decoder rises with ISO (`RAWDeveloper.Options.adaptive(iso:)`): the print's
 contrast amplifies shadow noise, and dye-transfer prints are grainless.
