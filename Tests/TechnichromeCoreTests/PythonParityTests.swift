@@ -21,6 +21,11 @@ final class PythonParityTests: XCTestCase {
         return try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
     }
 
+    /// Both sides compute in float64; what differs is the Swift cube's Float32 storage (about 1.6e-8 on the output)
+    /// and rounding in the curves (about 1e-15 on the densities), well inside these bounds.
+    static let densityTolerance = 1e-7
+    static let outputTolerance = 1e-6
+
     /// Checks one block of the fixture; returns the worst density and output errors.
     func check(_ parameters: EngineParameters, _ samples: [Sample], fixture f: Fixture, name: String) -> (density: Double, output: Double) {
         let space: PrintModel.DisplaySpace = f.displaySpace == "srgb" ? .sRGB : .displayP3
@@ -29,15 +34,15 @@ final class PythonParityTests: XCTestCase {
         for s in samples {
             let input = SIMD3(s.input[0], s.input[1], s.input[2])
             let (dye, key) = pipe.densities(sceneLinear: input)
-            XCTAssertEqual(dye.x, s.dye[0], accuracy: 2e-3, "\(name): cyan density for \(s.input)")
-            XCTAssertEqual(dye.y, s.dye[1], accuracy: 2e-3, "\(name): magenta density for \(s.input)")
-            XCTAssertEqual(dye.z, s.dye[2], accuracy: 2e-3, "\(name): yellow density for \(s.input)")
-            XCTAssertEqual(key, s.key, accuracy: 2e-3, "\(name): key density for \(s.input)")
+            XCTAssertEqual(dye.x, s.dye[0], accuracy: Self.densityTolerance, "\(name): cyan density for \(s.input)")
+            XCTAssertEqual(dye.y, s.dye[1], accuracy: Self.densityTolerance, "\(name): magenta density for \(s.input)")
+            XCTAssertEqual(dye.z, s.dye[2], accuracy: Self.densityTolerance, "\(name): yellow density for \(s.input)")
+            XCTAssertEqual(key, s.key, accuracy: Self.densityTolerance, "\(name): key density for \(s.input)")
             worstDensity = max(worstDensity, abs(dye.x - s.dye[0]), abs(dye.y - s.dye[1]), abs(dye.z - s.dye[2]), abs(key - s.key))
             let out = pipe.develop(sceneLinear: input)
             for i in 0..<3 {
                 worstOutput = max(worstOutput, abs(out[i] - s.output[i]))
-                XCTAssertEqual(out[i], s.output[i], accuracy: 4e-3, "\(name): output channel \(i) for \(s.input)")
+                XCTAssertEqual(out[i], s.output[i], accuracy: Self.outputTolerance, "\(name): output channel \(i) for \(s.input)")
             }
         }
         return (worstDensity, worstOutput)
