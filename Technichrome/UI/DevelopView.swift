@@ -47,6 +47,8 @@ struct DevelopView: View {
     @State private var comparing = false
     @State private var appleImage: UIImage?
     @State private var showsLab = false
+    /// The stored record when the Laboratory opened, to tell on its dismissal whether it re-developed the photograph.
+    @State private var recordBeforeLab: PhotoRecord?
 
     var body: some View {
         ZStack {
@@ -68,7 +70,7 @@ struct DevelopView: View {
         } message: { Text(saveError ?? "") }
         // Presented from this cover, not from RootView: RootView is already presenting the cover and UIKit lets a
         // view controller present one modal at a time, so a sheet requested there is dropped.
-        .sheet(isPresented: $showsLab) {
+        .sheet(isPresented: $showsLab, onDismiss: reloadAfterLab) {
             // The stored record, which carries the print timing and parameters this develop wrote.
             LaboratoryView(record: model.store.record(id: record.id) ?? record)
                 .environment(model)
@@ -138,7 +140,10 @@ struct DevelopView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                PillButton(title: "Lab") { showsLab = true }
+                PillButton(title: "Lab") {
+                    recordBeforeLab = model.store.record(id: record.id)
+                    showsLab = true
+                }
                 .disabled(!developed)
                 .opacity(developed ? 1 : 0.4)
             }
@@ -214,10 +219,26 @@ struct DevelopView: View {
         }
     }
 
+    /// The Laboratory may have re-developed the photograph (a new developed.jpg, and new parameters and timing on the
+    /// stored record): show that print, decoded off the main thread at a bounded size, and let it be saved even if
+    /// the earlier one was, so that what is shown, saved and shared is the same print.
+    private func reloadAfterLab() {
+        guard let latest = model.store.record(id: record.id), latest != recordBeforeLab else { return }
+        saved = false
+        let url = model.store.developedURL(for: latest)
+        Task {
+            if let image = await Task.detached(priority: .userInitiated, operation: { DevelopService.decodeDownscaled(url, maxPixelSize: 4096) }).value {
+                finalImage = image
+            }
+        }
+    }
+
     private func save() {
         Task {
             do {
-                try await ExportService.saveToPhotos(record: record, store: model.store, includeRAW: model.settings.saveRAWWithPrint)
+                // The stored record: a re-develop from the Laboratory changes its parameters and timing.
+                let current = model.store.record(id: record.id) ?? record
+                try await ExportService.saveToPhotos(record: current, store: model.store, includeRAW: model.settings.saveRAWWithPrint)
                 saved = true
                 Haptics.success()
             } catch {
