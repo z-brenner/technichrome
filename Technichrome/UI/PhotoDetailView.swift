@@ -97,21 +97,23 @@ struct PhotoDetailView: View {
     }
 
     private var infoPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            row("Source", record.rawKind == .none ? "No RAW (display-referred image)" : "\(record.rawKind.rawValue) · \(record.pixelWidth)×\(record.pixelHeight)")
-            row("Camera", record.cameraModel ?? "—")
-            if let iso = record.iso, let t = record.exposureDuration {
-                row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), record.exposureBias))
+        // The stored record, so a re-develop in the Laboratory (its timing, its decoder) shows here at once.
+        let r = model.store.record(id: record.id) ?? record
+        return VStack(alignment: .leading, spacing: 6) {
+            row("Source", r.rawKind == .none ? "No RAW (display-referred image)" : "\(r.rawKind.rawValue) · \(r.pixelWidth)×\(r.pixelHeight)")
+            row("Camera", r.cameraModel ?? "—")
+            if let iso = r.iso, let t = r.exposureDuration {
+                row("Exposure", String(format: "ISO %.0f · 1/%.0f s · %+.1f EV", iso, 1 / max(t, 1e-6), r.exposureBias))
             }
-            row("Baseline", String(format: "%+.2f EV (DNG)", record.baselineExposure))
-            if let version = record.decoderVersion {
-                let highlights = record.highlightRecovery.map { $0 ? "on" : "off" } ?? "decoder default"
+            row("Baseline", String(format: "%+.2f EV (DNG)", r.baselineExposure))
+            if let version = r.decoderVersion {
+                let highlights = r.highlightRecovery.map { $0 ? "on" : "off" } ?? "decoder default"
                 row("Decoder", "CIRAWFilter \(version) · highlight recovery \(highlights)")
             }
             #if DEBUG
-            if record.hasRAW { measurementRow }
+            if r.hasRAW { measurementRow }
             #endif
-            row("Print", "\(record.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", record.printExposureEV)) EV · timed \(String(format: "%+.2f", record.printTimingEV)) EV")
+            row("Print", "\(r.parameters?.name ?? "Technichrome v1") · \(String(format: "%+.1f", r.printExposureEV)) EV · timed \(String(format: "%+.2f", r.printTimingEV)) EV")
         }
         .padding(14)
         .background(Theme.panel)
@@ -145,7 +147,7 @@ struct PhotoDetailView: View {
     private func writeMeasurements() {
         guard let dev = model.develop else { return }
         let store = model.store
-        let rec = record
+        let rec = store.record(id: record.id) ?? record      // with the decoder version it was developed with
         measuring = true
         Task {
             do {
