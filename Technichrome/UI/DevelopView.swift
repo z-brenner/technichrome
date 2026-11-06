@@ -41,6 +41,8 @@ struct DevelopView: View {
     @State private var finalImage: CGImage?
     @State private var developed = false
     @State private var failure: String?
+    /// A failed save (Photos access denied, for example) keeps the develop screen open, unlike `failure`.
+    @State private var saveError: String?
     @State private var saved = false
     @State private var comparing = false
     @State private var appleImage: UIImage?
@@ -60,6 +62,9 @@ struct DevelopView: View {
         .alert("Development failed", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK") { dismiss() }
         } message: { Text(failure ?? "") }
+        .alert("Could not save to Photos", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("OK") {}
+        } message: { Text(saveError ?? "") }
     }
 
     private var header: some View {
@@ -201,7 +206,8 @@ struct DevelopView: View {
                 saved = true
                 Haptics.success()
             } catch {
-                failure = error.localizedDescription
+                saveError = error.localizedDescription
+                Haptics.error()
             }
         }
     }

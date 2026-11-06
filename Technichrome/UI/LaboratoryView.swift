@@ -21,6 +21,8 @@ struct LaboratoryView: View {
     @State private var linearCache: (CIImage, Double, Double)?   // image, baseline, long edge
     @State private var renderTask: Task<Void, Never>?
     @State private var busy = false
+    /// Why the photograph could not be opened or rendered (shown in place of the preview).
+    @State private var loadError: String?
     @State private var message: String?
     @State private var exportURL: URL?
     @State private var importing = false
@@ -83,6 +85,12 @@ struct LaboratoryView: View {
                 } else {
                     Image(decorative: preview, scale: 1, orientation: .up).resizable().scaledToFit()
                 }
+            } else if let loadError {
+                VStack(spacing: 8) {
+                    TCLabel("could not open this photograph", size: 10, color: Theme.ivory)
+                    Text(loadError).font(Theme.body(12)).foregroundStyle(Theme.ivoryDim).multilineTextAlignment(.center)
+                }
+                .padding(24)
             } else {
                 TCLabel(record == nil ? "take a photograph to see it here" : "rendering", size: 10)
             }
@@ -129,12 +137,17 @@ struct LaboratoryView: View {
         guard let record, let dev = model.develop else { return }
         let store = model.store
         Task.detached(priority: .userInitiated) {
-            guard let source = try? dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true) else { return }
-            let (img, baseline) = source
-            let longEdge = Double(max(img.extent.width, img.extent.height))
-            await MainActor.run {
-                linearCache = (img, baseline, longEdge)
-                scheduleRender()
+            do {
+                let (img, baseline) = try dev.linearSource(for: record, store: store, scaleFactor: 0.25, draft: true)
+                let longEdge = Double(max(img.extent.width, img.extent.height))
+                await MainActor.run {
+                    linearCache = (img, baseline, longEdge)
+                    scheduleRender()
+                }
+            } catch {
+                // Without this the preview would say "rendering" for ever (a deleted original, an undecodable file).
+                let text = error.localizedDescription
+                await MainActor.run { loadError = text }
             }
         }
     }
@@ -151,7 +164,10 @@ struct LaboratoryView: View {
             let out = dev.makePrint(linear: img, baselineEV: baseline, parameters: p, extraEV: record.totalPrintEV, fullLongEdge: longEdge)
             let cg = dev.render(out)
             if Task.isCancelled { return }
-            await MainActor.run { preview = cg; busy = false }
+            await MainActor.run {
+                if let cg { preview = cg } else if preview == nil { loadError = DevelopError.renderFailed.localizedDescription }
+                busy = false
+            }
         }
     }
 
