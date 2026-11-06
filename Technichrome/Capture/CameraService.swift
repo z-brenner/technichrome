@@ -404,6 +404,9 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
             if let i = controlLenses.firstIndex(of: current), picker.selectedIndex != i { picker.selectedIndex = i }
             return
         }
+        // Installed already. With a single lens there is no picker to update, and without this guard every
+        // reconfiguration (a full-resolution toggle) would add another slider.
+        guard exposureControl == nil else { return }
         // Exposure compensation in thirds of a stop, the same range as the on-screen control.
         let values = (-9...9).map { Float($0) / 3 }
         let slider = AVCaptureSlider("Exposure", symbolName: "plusminus.circle", values: values)
