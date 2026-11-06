@@ -90,6 +90,15 @@ final class EngineGPUParityTests: XCTestCase {
         try checkGPUAgainstReference(params, "unequal dye D max")
     }
 
+    func testGPUEngineMatchesCPUReferenceWithEachMeasuredDyeSet() throws {
+        // Other spectra and other gains: each axis of the cube spans gain · D max, so these cubes span other ranges.
+        for set in EngineParameters.dyeSets where set != EngineParameters.default.dyeSet {
+            var params = EngineParameters.default
+            params.useDyeSet(set)
+            try checkGPUAgainstReference(params, "\(set.label) dyes")
+        }
+    }
+
     func testMisregistrationLeavesUniformImageUnchanged() throws {
         // A uniform image shifted against itself must print identically: guards the alpha-summing class of bug.
         let engine = try TechnichromeEngine(lutDimension: 33)
