@@ -30,6 +30,9 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
     /// The photographer's exposure compensation, excluded from the preview's print timing like the develop step's.
     var cameraBiasEV: Double = 0
     var showsLook = true { didSet { dirty = true } }
+    /// The camera's system pressure. The preview's own cost is shed first: from `.serious` the timing
+    /// measurement pauses, from `.critical` the preview is plain (photographs are still developed with the look).
+    var systemPressure: CameraPressure = .nominal { didSet { if systemPressure != oldValue { dirty = true } } }
     /// Print timing for the preview: measured about twice a second from the frames and smoothed, so the
     /// preview predicts the timed print rather than the untimed one.
     private(set) var previewTimingEV: Double = 0
@@ -95,10 +98,10 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         var image = preScale < 1
             ? source.transformed(by: CGAffineTransform(scaleX: preScale, y: preScale), highQualityDownsample: true)
             : source
-        if showsLook, let engine {
+        if showsLook, systemPressure < .critical, let engine {
             frameCounter &+= 1
             if parameters.timingStrength > 0 {
-                if frameCounter % 12 == 1 {
+                if frameCounter % 12 == 1, systemPressure < .serious {
                     let measured = measurePreviewTiming(of: image, engine: engine)
                     previewTimingEV += 0.35 * (measured - previewTimingEV)   // settles within about a second
                 }

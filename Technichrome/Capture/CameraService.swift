@@ -75,6 +75,45 @@ public struct CaptureFact: Identifiable, Sendable, Equatable {
     public var id: String { label }
 }
 
+/// The capture device's system-pressure level (heat, power draw), as AVFoundation reports it.
+public enum CameraPressure: Int, Sendable, Comparable {
+    case nominal, fair, serious, critical, shutdown
+
+    public static func < (a: CameraPressure, b: CameraPressure) -> Bool { a.rawValue < b.rawValue }
+
+    init(_ level: AVCaptureDevice.SystemPressureState.Level) {
+        switch level {
+        case .fair: self = .fair
+        case .serious: self = .serious
+        case .critical: self = .critical
+        case .shutdown: self = .shutdown
+        default: self = .nominal
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        case .shutdown: return "shutdown"
+        }
+    }
+}
+
+/// What the session is actually doing, reported by the core whenever it changes: read from the session, not
+/// inferred from what was asked of it.
+struct CaptureSessionState: Sendable, Equatable {
+    var isRunning = false
+    var isInterrupted = false
+    /// Why the session is interrupted (a call, another app using the camera, heat), while it is.
+    var interruption: String?
+    /// A runtime error that stopped the session and was not recovered automatically.
+    var error: String?
+    var pressure: CameraPressure = .nominal
+}
+
 /// State the core reports back after (re)configuration.
 struct CaptureConfiguration: Sendable {
     var rawKind: RAWKind
@@ -88,7 +127,19 @@ struct CaptureConfiguration: Sendable {
 @MainActor
 @Observable
 public final class CameraService {
+    /// The session's real running state (observed on the session, not set when `start` returns).
     public private(set) var isRunning = false
+    /// Interrupted by the system: a call, another app using the camera, Picture in Picture, heat.
+    public private(set) var isInterrupted = false
+    /// Why, while interrupted.
+    public private(set) var interruption: String?
+    /// The last interruption reason seen since launch (shown in Settings, for the hardware checklist).
+    public private(set) var lastInterruption: String?
+    /// A runtime error that stopped the session (cleared when it runs again).
+    public private(set) var sessionError: String?
+    /// The camera's system pressure. From `.serious` the preview stream is throttled and the timed-preview
+    /// measurement pauses; from `.critical` the preview drops the look.
+    public private(set) var pressure: CameraPressure = .nominal
     public private(set) var isConfigured = false
     public private(set) var authorizationDenied = false
     public private(set) var currentLens: Lens = .wide
@@ -105,6 +156,8 @@ public final class CameraService {
     public private(set) var isExposureFocusLocked = false
     /// Whether to also request Apple's processed HEIF alongside the RAW (for the comparison view).
     public var captureCompanionHEIF = true
+    /// Whether the shutter can take a photograph now.
+    public var canCapture: Bool { isConfigured && isRunning && !isInterrupted }
     /// Request the largest photo size the format offers (48 MP on recent main cameras) instead of 12 MP.
     public var fullResolutionRAW = false {
         didSet {
@@ -124,6 +177,10 @@ public final class CameraService {
         }
         core.lensFromControl = { [weak self] lens in
             Task { @MainActor in self?.switchLens(lens) }
+        }
+        // FIFO on the main queue, so the states are applied in the order the session queue reported them.
+        core.stateChanged = { [weak self] state in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.applySession(state) } }
         }
     }
 
@@ -154,7 +211,7 @@ public final class CameraService {
             let config = try await core.start(lens: currentLens)
             apply(config)
             isConfigured = true
-            isRunning = true
+            lastError = nil
         } catch {
             lastError = error.localizedDescription
         }
@@ -162,7 +219,15 @@ public final class CameraService {
 
     public func stop() {
         core.stop()
-        isRunning = false
+    }
+
+    private func applySession(_ s: CaptureSessionState) {
+        isRunning = s.isRunning
+        isInterrupted = s.isInterrupted
+        interruption = s.interruption
+        if let reason = s.interruption { lastInterruption = reason }
+        sessionError = s.error
+        pressure = s.pressure
     }
 
     private func apply(_ c: CaptureConfiguration) {
@@ -227,7 +292,8 @@ public final class CameraService {
     // MARK: - Capture
 
     public func capture() async throws -> CaptureResult {
-        guard isConfigured, !isCapturing else { throw CameraError.captureFailed("camera busy") }
+        guard canCapture else { throw CameraError.captureFailed(interruption ?? "the camera is not running") }
+        guard !isCapturing else { throw CameraError.captureFailed("camera busy") }
         isCapturing = true
         defer { isCapturing = false }
         return try await core.capture(lens: currentLens, bias: exposureBias, wantCompanion: captureCompanionHEIF)
@@ -264,24 +330,53 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     /// Called (on the session queue) when the hardware controls change a value.
     var exposureBiasFromControl: (@Sendable (Float) -> Void)?
     var lensFromControl: (@Sendable (Lens) -> Void)?
+    /// Called on the session queue whenever the session's state changes.
+    var stateChanged: (@Sendable (CaptureSessionState) -> Void)?
+
+    // Session state, observed rather than assumed (queue only).
+    private var state = CaptureSessionState()
+    /// Whether the app wants the session running: a media-services reset restarts it only then.
+    private var wantsRunning = false
+    /// One automatic restart per `start`, so a reset that recurs cannot become a restart loop.
+    private var automaticRestartUsed = false
+    private var sessionObservers: [NSObjectProtocol] = []
+    private var runningObservation: NSKeyValueObservation?
+    private var pressureObservation: NSKeyValueObservation?
+    /// Whether the frame rate is currently throttled for system pressure.
+    private var throttled = false
 
     /// How long a capture may take before the continuation is failed (keeps the shutter from locking up
     /// if the delegate is never called).
     private let captureTimeout: TimeInterval = 20
+
+    override init() {
+        super.init()
+        installSessionObservers()
+    }
+
+    deinit {
+        sessionObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
 
     // MARK: Lifecycle
 
     func start(lens: Lens) async throws -> CaptureConfiguration {
         try await withCheckedThrowingContinuation { cont in
             queue.async { [self] in
+                wantsRunning = true
+                automaticRestartUsed = false
+                state.error = nil
                 do {
                     if !configured {
                         try configureSession(lens: lens)
                         applyRAWPolicy()
                     }
+                    // Blocks until the session runs or fails; a failure arrives as a runtime-error notification.
                     if !session.isRunning { session.startRunning() }
+                    reportState()
                     cont.resume(returning: lastConfiguration)
                 } catch {
+                    reportState()
                     cont.resume(throwing: error)
                 }
             }
@@ -290,8 +385,107 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
 
     func stop() {
         queue.async { [self] in
+            wantsRunning = false
             if session.isRunning { session.stopRunning() }
+            reportState()
         }
+    }
+
+    // MARK: Session state
+
+    /// Registered once for the session's lifetime. Each handler hops to `queue`, where every AVFoundation
+    /// object is used, and the state is reported from there, so the reports reach the main actor in order.
+    private func installSessionObservers() {
+        let center = NotificationCenter.default
+        sessionObservers = [
+            center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] n in
+                let error = n.userInfo?[AVCaptureSessionErrorKey] as? AVError
+                self?.queue.async { self?.handleRuntimeError(error) }
+            },
+            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] n in
+                let reason = (n.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)
+                    .flatMap { AVCaptureSession.InterruptionReason(rawValue: $0.intValue) }
+                self?.queue.async { self?.handleInterruption(reason) }
+            },
+            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
+                // The session resumes by itself when an interruption ends.
+                self?.queue.async { self?.reportState() }
+            },
+        ]
+        runningObservation = session.observe(\.isRunning, options: [.new]) { [weak self] _, _ in
+            self?.queue.async { self?.reportState() }
+        }
+    }
+
+    /// Publishes the session's real state. Runs on `queue`.
+    private func reportState() {
+        state.isRunning = session.isRunning
+        state.isInterrupted = session.isInterrupted
+        if !state.isInterrupted { state.interruption = nil }
+        if state.isRunning { state.error = nil }
+        stateChanged?(state)
+    }
+
+    private func handleRuntimeError(_ error: AVError?) {
+        // A media-services reset (the media server restarted) leaves a session that can be started again.
+        // Restart only if the app wants the camera running, and once per `start`: a reset that recurs is
+        // reported instead of looping.
+        if error?.code == .mediaServicesWereReset, wantsRunning, !automaticRestartUsed {
+            automaticRestartUsed = true
+            session.startRunning()
+            if session.isRunning { reportState(); return }
+        }
+        state.error = error?.localizedDescription ?? "The camera stopped unexpectedly."
+        reportState()
+    }
+
+    private func handleInterruption(_ reason: AVCaptureSession.InterruptionReason?) {
+        state.interruption = Self.describe(reason)
+        reportState()
+    }
+
+    static func describe(_ reason: AVCaptureSession.InterruptionReason?) -> String {
+        switch reason {
+        case .videoDeviceNotAvailableInBackground?: return "camera unavailable in the background"
+        case .audioDeviceInUseByAnotherClient?: return "audio in use by another app"
+        case .videoDeviceInUseByAnotherClient?: return "camera in use by another app"
+        case .videoDeviceNotAvailableWithMultipleForegroundApps?: return "camera unavailable with several apps on screen"
+        case .videoDeviceNotAvailableDueToSystemPressure?: return "camera paused: the iPhone is too hot"
+        default: return "camera interrupted"
+        }
+    }
+
+    /// Observes the current device's system pressure (heat, power). Replaced with the device.
+    private func observePressure(of dev: AVCaptureDevice) {
+        throttled = false                 // adding the input reset the device's frame durations to their defaults
+        pressureObservation = dev.observe(\.systemPressureState, options: [.initial, .new]) { [weak self] dev, _ in
+            let pressure = CameraPressure(dev.systemPressureState.level)
+            self?.queue.async { self?.handlePressure(pressure, device: dev) }
+        }
+    }
+
+    /// Frame-rate throttling, which AVFoundation recommends against system pressure: from `.serious` up the
+    /// preview stream runs at 15–20 fps (the values of Apple's AVCam sample, which also uses the `.photo`
+    /// preset); below it the device's defaults return. Photographs are unaffected.
+    private func handlePressure(_ pressure: CameraPressure, device dev: AVCaptureDevice) {
+        guard dev === device else { return }      // a late report from the previous lens
+        let throttle = pressure >= .serious
+        if throttle != throttled, (try? dev.lockForConfiguration()) != nil {
+            if throttle {
+                if dev.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 15 && $0.maxFrameRate >= 20 }) {
+                    dev.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 20)
+                    dev.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 15)
+                    throttled = true
+                }
+            } else {
+                dev.activeVideoMinFrameDuration = .invalid
+                dev.activeVideoMaxFrameDuration = .invalid
+                throttled = false
+            }
+            dev.unlockForConfiguration()
+        }
+        state.pressure = pressure
+        reportState()
     }
 
     /// Rebuilds the session for a lens or a photo-size change. A session that was stopped (the camera view
@@ -321,7 +515,8 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     private func configureSession(lens: Lens) throws {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
-        session.sessionPreset = .photo
+        // Assigned only when it differs: choosing a preset resets the device's frame durations (pressure throttling).
+        if session.sessionPreset != .photo { session.sessionPreset = .photo }
         // The live preview is linearised from the video stream, so keep that stream plain: no video HDR
         // (local tone mapping) and a known sRGB colour space instead of automatic wide colour.
         session.automaticallyConfiguresCaptureDeviceForWideColor = false
@@ -349,6 +544,7 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         guard session.canAddInput(input) else { throw CameraError.configurationFailed("cannot add camera input") }
         session.addInput(input)
         videoInput = input
+        observePressure(of: dev)
 
         if !session.outputs.contains(photoOutput) {
             guard session.canAddOutput(photoOutput) else { throw CameraError.configurationFailed("cannot add photo output") }

@@ -36,6 +36,17 @@ struct SettingsView: View {
                                 Text(fact.value).font(Theme.mono(11)).multilineTextAlignment(.trailing)
                             }
                         }
+                        // The session's observed state, for the interruption and heat checks of the checklist.
+                        LabeledContent("Session") {
+                            Text(model.camera.isInterrupted ? "interrupted" : (model.camera.isRunning ? "running" : "stopped"))
+                                .font(Theme.mono(11))
+                        }
+                        LabeledContent("System pressure") {
+                            Text(model.camera.pressure.label).font(Theme.mono(11))
+                        }
+                        LabeledContent("Last interruption") {
+                            Text(model.camera.lastInterruption ?? "none since launch").font(Theme.mono(11)).multilineTextAlignment(.trailing)
+                        }
                     }
                 } header: {
                     Text("Camera on this iPhone")
