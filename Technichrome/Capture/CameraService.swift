@@ -242,6 +242,7 @@ public final class CameraService {
 
     public func switchLens(_ lens: Lens) {
         guard lens != currentLens else { return }
+        let previous = currentLens
         currentLens = lens
         isExposureFocusLocked = false     // the new camera starts in continuous focus and exposure
         Task {
@@ -249,6 +250,8 @@ public final class CameraService {
                 let config = try await core.reconfigure(lens: lens)
                 apply(config)
             } catch {
+                // The core kept the previous camera; say so, unless another switch came in meanwhile.
+                if currentLens == lens { currentLens = previous }
                 lastError = error.localizedDescription
             }
         }
@@ -488,22 +491,18 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         reportState()
     }
 
-    /// Rebuilds the session for a lens or a photo-size change. A session that was stopped (the camera view
-    /// is away) stays stopped: the next `start` runs it with the new configuration.
+    /// A lens or photo-size change, in one configuration of the running (or stopped) session: one pipeline
+    /// rebuild, never a moment without an input. If the new camera cannot be added the previous one stays
+    /// (see `configureSession`) and the error is thrown.
     func reconfigure(lens: Lens) async throws -> CaptureConfiguration {
         try await withCheckedThrowingContinuation { cont in
             queue.async { [self] in
                 do {
-                    let wasRunning = session.isRunning
-                    session.beginConfiguration()
-                    if let old = videoInput { session.removeInput(old); videoInput = nil }
-                    configured = false
-                    session.commitConfiguration()
                     try configureSession(lens: lens)
                     applyRAWPolicy()
-                    if wasRunning, !session.isRunning { session.startRunning() }
                     cont.resume(returning: lastConfiguration)
                 } catch {
+                    syncLensPicker()          // back on the lens that is actually in use
                     cont.resume(throwing: error)
                 }
             }
@@ -531,6 +530,22 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
                 ?? discovery.devices.first else {
             throw CameraError.noCamera
         }
+        // The camera input is swapped inside this one configuration, only when the camera changes (a photo-size
+        // change keeps it). As in Apple's AVCam, the new input is made before the old one is removed, and if the
+        // session refuses it the old one goes back, so a failed lens change never leaves the session without a
+        // camera; everything tied to the device changes only once the new input is in.
+        if videoInput?.device !== dev {
+            let input = try AVCaptureDeviceInput(device: dev)
+            let old = videoInput
+            if let old { session.removeInput(old) }
+            guard session.canAddInput(input) else {
+                if let old, session.canAddInput(old) { session.addInput(old) }
+                throw CameraError.configurationFailed("cannot add camera input")
+            }
+            session.addInput(input)
+            videoInput = input
+            observePressure(of: dev)
+        }
         device = dev
         locked = false                    // the device below is put into continuous focus and exposure
         // A change of subject (the user recomposed) returns a tapped focus to continuous mode, unless locked.
@@ -540,20 +555,13 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
             // Check and reset in one queue operation, so a lock requested in between cannot be undone.
             self.queue.async { if !self.locked { self.resetFocusNow() } }
         }
-        let input = try AVCaptureDeviceInput(device: dev)
-        guard session.canAddInput(input) else { throw CameraError.configurationFailed("cannot add camera input") }
-        session.addInput(input)
-        videoInput = input
-        observePressure(of: dev)
 
         if !session.outputs.contains(photoOutput) {
             guard session.canAddOutput(photoOutput) else { throw CameraError.configurationFailed("cannot add photo output") }
             session.addOutput(photoOutput)
         }
         photoOutput.maxPhotoQualityPrioritization = .quality
-        if let chosen = Self.photoDimensions(for: dev.activeFormat, fullResolution: preferFullResolution) {
-            photoOutput.maxPhotoDimensions = chosen
-        }
+        // maxPhotoDimensions is chosen after the commit, in applyRAWPolicy.
 
         if !session.outputs.contains(videoOutput) {
             videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -639,10 +647,25 @@ final class CaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         return v
     }
 
-    /// RAW policy, decided after the configuration is committed: Bayer first; ProRAW only when the camera
-    /// offers no Bayer format at all (enabling ProRAW reconfigures the pipeline, so it happens before
-    /// `startRunning`, as Apple recommends).
+    /// Keeps the Camera Control lens picker on the camera actually in use (after a lens change that failed).
+    private func syncLensPicker() {
+        guard #available(iOS 18.0, *), let picker = lensControl as? AVCaptureIndexPicker,
+              let lens = Lens.allCases.first(where: { $0.deviceType == device?.deviceType }),
+              let i = controlLenses.firstIndex(of: lens), picker.selectedIndex != i else { return }
+        picker.selectedIndex = i
+    }
+
+    /// Photo size and RAW policy, decided after the configuration is committed (and before `startRunning` on
+    /// the first start, as Apple recommends for both, since each reconfigures the pipeline).
+    ///
+    /// The photo size must be one the *active* format supports, and the format a preset brings is only certain
+    /// once the configuration is committed, so it is chosen here rather than inside the configuration.
+    /// RAW: Bayer first; ProRAW only when the camera offers no Bayer format at all.
     private func applyRAWPolicy() {
+        if let dev = device, let chosen = Self.photoDimensions(for: dev.activeFormat, fullResolution: preferFullResolution) {
+            let current = photoOutput.maxPhotoDimensions
+            if current.width != chosen.width || current.height != chosen.height { photoOutput.maxPhotoDimensions = chosen }
+        }
         let formats = photoOutput.availableRawPhotoPixelFormatTypes
         if formats.contains(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) {
             lastConfiguration.rawKind = .bayer
