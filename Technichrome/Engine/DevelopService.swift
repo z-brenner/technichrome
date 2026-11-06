@@ -10,6 +10,7 @@ import Foundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreGraphics
+import Metal
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -31,11 +32,31 @@ public enum DevelopError: Error, LocalizedError {
 
 public final class DevelopService: @unchecked Sendable {
     public let engine: TechnichromeEngine
+    /// Quick renders: the reveal's stages, the Laboratory, the timing, the materialised decode.
     public let context: CIContext
+    /// The full-resolution develop, at low GPU priority (`priorityRequestLow`: rendering from a background
+    /// thread "takes lower priority than other GPU usage from the main thread", so UI animations keep their
+    /// frame rate). Apple recommends a context per background task, so a second one is within guidance.
+    public let developContext: CIContext
 
     public init(engine: TechnichromeEngine) {
         self.engine = engine
         self.context = CIContext.technichrome()
+        self.developContext = Self.lowPriorityContext()
+    }
+
+    /// The options of `CIContext.technichrome()` plus `priorityRequestLow`. Written out here because that
+    /// factory lives with the engine; keep the two in step.
+    private static func lowPriorityContext(device: MTLDevice? = MTLCreateSystemDefaultDevice()) -> CIContext {
+        let options: [CIContextOption: Any] = [
+            .workingColorSpace: TechnichromeEngine.workingColorSpace,
+            .workingFormat: CIFormat.RGBAh,
+            .cacheIntermediates: false,
+            .name: "Technichrome develop",
+            .priorityRequestLow: true,
+        ]
+        if let device { return CIContext(mtlDevice: device, options: options) }
+        return CIContext(options: options)
     }
 
     /// Long edge of the quick decodes (the develop reveal, the Laboratory), in pixels. A cap on top of the
@@ -150,8 +171,8 @@ public final class DevelopService: @unchecked Sendable {
         let developedURL = store.developedURL(for: record)
         let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
         do {
-            try context.writeJPEGRepresentation(of: print, to: developedURL, colorSpace: TechnichromeEngine.outputColorSpace,
-                                                options: [quality: 0.95])
+            try developContext.writeJPEGRepresentation(of: print, to: developedURL, colorSpace: TechnichromeEngine.outputColorSpace,
+                                                       options: [quality: 0.95])
         } catch {
             throw DevelopError.writeFailed(developedURL)
         }
