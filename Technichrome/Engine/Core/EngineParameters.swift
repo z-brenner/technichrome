@@ -117,8 +117,8 @@ public struct EngineParameters: Codable, Equatable, Sendable {
     public var matrixLogE0: Double
     public var matrixNu: Double
 
-    // MARK: Silver key image (printed from the green record; used c. 1932–1944)
-    /// 0 = no key (post-1944 prints), 1 = the full documented "50 %" image.
+    // MARK: Silver key image (printed here from the green record; its record, strength and era: docs/COLOR_SCIENCE.md)
+    /// 0 = no key, 1 = the model's full key (period sources call the real one "thin").
     public var keyStrength: Double
     public var key: CurveParameters
 
@@ -137,8 +137,9 @@ public struct EngineParameters: Codable, Equatable, Sendable {
     /// Viewing-condition compensation: a dark-surround print viewed on a bright-surround phone.
     /// Applied as a power on display-linear values (1 = none).
     public var surroundExponent: Double
-    /// Projection flare as a fraction of screen white, added after the key: (c + f) / (1 + f). Ball (1935)
-    /// gives the projected contrast as "about 1 to 64", i.e. 1/64; the shipped look uses 0 (see the docs).
+    /// Projection flare as a fixed fraction of screen white, added after the key: (c + f) / (1 + f). Ball's (1935)
+    /// "about 1 to 64" is a general remark (measured lens flare follows the frame's mean transmission, Jones and
+    /// Tuttle 1926); the shipped look uses 0 (see the docs).
     public var screenFlare: Double
 
     // MARK: Print timing (see PrintTiming.swift)

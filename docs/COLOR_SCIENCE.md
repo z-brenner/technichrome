@@ -33,16 +33,30 @@ Film Colors (Flueckiger), Wikipedia's *Technicolor* and *Dye-transfer process* e
 * The dyes were the subtractive primaries: cyan from the red record, magenta from the green record,
   yellow from the blue record. Ball's demonstration reel built the print as sound track + yellow, then
   cyan, then magenta. (Ball 1935.) The develop animation in the app follows this order.
-* Until about 1944 the blank carried, before the dye transfers, a weak ("50 %") black-and-white
-  silver positive of the green record — the **key image** — which improved apparent sharpness and
-  black density and covered fringing, at the cost of colourfulness. Sources disagree on the exact
-  year it was dropped (Wikipedia: 1944; a CML discussion: "the 1930s").
+* Before the dye transfers, the blank could carry a thin black-and-white silver positive, the **key
+  image**, which improved definition and added density "which might otherwise necessitate an excessive
+  density of the dyes"; it "may be printed from any of the three negatives, or occasionally from a
+  combination of two of them, according to the requirements of the subject" (*Kinematograph Weekly*,
+  23 Jan. 1937, on the new London laboratory). Kalmus: "The present system is really four-component —
+  the three components ordinarily thought of as the color components, and black" (JSMPE 31, 1938).
+  Cornwell-Clyne (*Colour Cinematography*, 3rd ed. 1951, pp. 465–467) names the green record, writes
+  that the key is "said now to be omitted", and that London blanks carried it "in some cases" (the
+  "gray" in London, the "key" in Hollywood). By 1957 "the only silver in an imbibition color release
+  print is in the soundtrack area" (SMPTE, *Elements of Color in Professional Motion Pictures*,
+  p. 30). Period sources call it "thin", "lightly printed", "faint": the "50 %" strength and the 1944 end
+  date that are often quoted (Wikipedia; the American WideScreen Museum) have no primary source.
+  Silver scatters light where dyes do not, so in a condenser projector a silver image projects denser
+  than its diffuse density: Callier's Q is "approximately 1.4" for motion-picture positive film (Mees,
+  JSMPE 24, 1935, p. 294).
 * Pin registration was critical; misregistration showed as colour fringes.
-* Projection contrast "from whitest white to blackest black" was "about 1 to 64". "All very full
-  exposures tend to bleach out to white and all low exposures tend to drop into black." A bleached
-  highlight on a face "will look blotchy". The brightest red "is obtained by full value of the magenta
-  and yellow dyes without any cyan dye"; more red light only overexposes the red negative and begins
-  to expose the green and blue negatives, so the print "tend[s] to bleach out to white". (Ball 1935.)
+* Ball compared projection with painting: "The contrast from whitest white to blackest black in a
+  painting is perhaps 1 to 32. Upon projection from transparencies, as in motion picture work, the
+  range may be slightly greater, about 1 to 64" — a general remark, not a measurement of Technicolor
+  prints or of flare. "All very full exposures tend to bleach out to white and all low exposures tend
+  to drop into black." A bleached highlight on a face "will look blotchy". The brightest red "is
+  obtained by full value of the magenta and yellow dyes without any cyan dye"; more red light only
+  overexposes the red negative and begins to expose the green and blue negatives, so the print
+  "tend[s] to bleach out to white". (Ball 1935.)
 * The emulsions were slow (sources quote ASA ≈ 5) and daylight-balanced, hence carbon-arc lighting
   on set and the heat for which the process was notorious.
 * Dye-transfer dyes are described as "very spectrally pure compared to normal coupler-induced
@@ -140,6 +154,21 @@ was fitted (`fit_tone.py`) to a projection-print target rendered for a phone: di
 ~0.81 display-linear, mid grey at ~0.19, a slope of about 1.5 through the shadows, and blacks that
 drop into density — Ball's "low exposures tend to drop into black".
 
+What the period sources say about the curves (**documented**; the model does not follow them yet):
+
+* The negatives: "Technicolor negatives are developed to a gamma of 0·65 in D-76" (Cornwell-Clyne
+  1951, p. 463). The model's 0.45 is lower; what sets the print's tone scale is the product with the
+  matrix γ (0.45 × 3.22 ≈ 0.65 × 2.23), so 0.65 with a matrix γ of about 2.23 keeps the tone scale
+  and changes a ColorChecker by about 0.6 ΔE00 on average, 1.2 at most (the research's estimate,
+  mostly highlights one or two L* darker).
+* The matrices: contrast was set by "blue filters of varying density", and "after exposure the matrix
+  film is given a flash fog to threshold value with light identical to that used for printing the
+  image" (Cornwell-Clyne 1951, p. 463). A relief image made the usual way has "no toe and a very sharp
+  shoulder", and the fog exposure gives "a toe it otherwise lacks" (*The Cine-Technician*, Nov. 1953,
+  unsigned). The model's matrix curve (ν 0.025) has the opposite asymmetry, an abrupt toe and a long
+  shoulder. No numerical matrix gamma or imbibition-print curve was found in JSMPE 1932–1952 or the
+  trade press.
+
 Technicolor balanced prints so greys printed neutral. The engine has the two controls a laboratory
 had: per-matrix **printer lights** (an exposure shift of each matrix curve, in stops) and per-matrix
 **contrast** (a density multiplier, Technicolor's "colour control"). Balanced with lights alone, this
@@ -148,10 +177,15 @@ describe as blacks with unwanted hues; so the shipped preset is balanced with th
 (`calibrate_neutral`: 1.202 / 0.909 / 0.889 for the chosen dyes) and the lights sit at zero, available
 in the Laboratory.
 
-The key image is on by default at 0.15 of the documented "50 %" strength — enough to deepen blacks
-neutrally and sharpen edges, not enough to flatten the reds the way the full key did in the 1930s.
-Three of the four films named in the brief (Black Narcissus 1947, The Red Shoes 1948, Singin' in the
-Rain 1952) are post-key prints; set it to 0 for that era, 0.5–1.0 for a 1930s print.
+The key image is on by default at strength 0.15 (1 is the model's full key, D max 1.1; the "50 %"
+long quoted for the real one has no primary source) — enough to deepen blacks neutrally and sharpen
+edges, not enough to flatten the reds the way a strong key would. The evidence above suggests: a key
+for 1930s prints (0.3–1.0); none for US prints after about 1950; small or none for late-1940s London
+prints, which carried a faint one "in some cases". Black Narcissus (1947) and The Red Shoes (1948)
+are London productions of that period; Singin' in the Rain (1952) is a Hollywood print, probably
+without one. The model prints the key from the green record only, where 1937 practice chose any
+record or a pair, and treats its strength as projected density (a diffuse density would be about
+1.4 times denser on a condenser projector).
 
 ### Print timing — a laboratory practice, modelled
 
@@ -253,21 +287,38 @@ column); `fit_dyes.py` fits and checks them. Technicolor dyes are reported not t
 
 ### [7] Projection — approximation
 
-The lamp is a 5400 K Planckian radiator (carbon arcs were close to daylight; the exact figure varies
-by carbon trim). The eye is the CIE 1931 2° standard observer, as tabulated by the CIE (CIE 018:2019)
+The lamp is a 5400 K Planckian radiator. **Documented:** Null, Lozier and Joy (National Carbon Co.,
+JSMPE 38, 1942) measured the light on the projection screen: "high-intensity screen light ranges from
+5020° to 5620°K", close to a black body but with "slightly less energy in the red and blue and more
+in the green" (from their Table I, a Duv of about +0.006: the research's estimate); the low-intensity
+arc gave 3870 K. Rackett of Technicolor (JSMPE 31, 1938): "Technicolor prints are balanced to yield a
+neutral image" on high-intensity arcs, which "produce a screen image that is slightly bluish". The
+model's 5400 K sits in the measured range; the green excess is not modelled (after adaptation it
+would move a ColorChecker by about 0.3 ΔE00 on average, the research's estimate). The eye is the CIE 1931 2° standard observer, as tabulated by the CIE (CIE 018:2019)
 at 5 nm from 360 to 830 nm, so equal-energy white integrates to xy (0.33331, 0.33329). It is assumed
 adapted to the screen white (projector through the clear base), so the print white is mapped to the
 display white with a Bradford transform. After adaptation the lamp's colour only produces second-order
 interactions with the dyes.
 
-**Screen flare — a documented figure, off by default.** Ball gives the projected contrast "from
-whitest white to blackest black" as "about 1 to 64": the print's own density, the projector's stray
-light and the theatre's flare together left the deepest black near 1/64 of the screen white. The
-engine's `screenFlare` adds that fraction of white after the key image, `(c + f) / (1 + f)`, before
-the viewing-condition exponent, and the Laboratory offers the 1:64 figure as a one-tap setting. The
-shipped look leaves it at 0: a phone is not a 1935 projection, an OLED shows the print's own density,
-and a black lifted to 1/64 of white reads as haze on a small bright screen. It is there for anyone
-matching a reference frame scanned from a projected or printed source, where it belongs.
+**Screen luminance — documented, not modelled.** The original screens were dim: 7 to 14 foot-lamberts
+recommended by the SMPE's Screen Brightness Committee in 1936 (JSMPE 35, 1940, p. 95), 10 fL in
+American Standard Z22.39 (1944), "9 to 14 foot-lamberts … with no film in the gate" (Zavesky, JSMPE
+50, 1948): about 34–48 cd/m² of open-gate white in a dark theatre, and a typical frame passes about
+10 % of that (JSMPE 39, 1942, p. 237). The model has no absolute luminance; the effects a dim screen
+has on appearance (Hunt, Stevens) would start from these figures.
+
+**Screen flare — approximation, off by default.** Ball's "about 1 to 64" is a general remark about
+projection compared with painting, not a measurement. The measurement is Jones and Tuttle's (*Trans.
+SMPE* 25, 1926): projection-lens flare is uniform over the screen and proportional to the frame's
+average transmission, about 0.06 times it, so it depends on the picture — dark scenes keep deep
+blacks, bright ones go grey. With frames that pass about 10 % on average (28 % at most; JSMPE 39,
+1942) that is about 0.6 % of open-gate white, 1:170, and 1.7 % for the brightest frames (estimates).
+Coated lenses after about 1940 cut flare (about 1 % lost per glass surface against 4 to 5 %; Rayton
+and Farnham, JSMPE 35, 1940). The engine's `screenFlare` is simpler: a fixed fraction of white added
+after the key image, `(c + f) / (1 + f)`, before the viewing-condition exponent, and the Laboratory
+offers Ball's 1:64 as a one-tap setting. The shipped look leaves it at 0: a phone is not a projection,
+an OLED shows the print's own density, and a lifted black reads as haze on a small bright screen. It
+is there for anyone matching a reference frame scanned from a projected source.
 
 ### [8] Display — approximation
 
@@ -282,8 +333,8 @@ brought into sRGB by the same chroma-toward-luminance clip, weighted by Rec. 709
 (`srgb_print` in the prototype, `PrintModel.sRGBPrint`, `srgbPrint`, the web's sRGB canvas). Until
 Round 25 there were two: the prototype's sRGB mode, used for the figures, baked the cube in sRGB,
 clipped it with P3 weights and applied key and exponent to sRGB channels, while the web's sRGB canvas
-did as above. A power per channel does not commute with the matrix, so they differed by up to 0.67
-ΔE00. The cube is now always P3, and the fixture carries the sRGB print of every sample, which the
+did as above. A power per channel does not commute with the matrix, so they differed by up to 0.69
+ΔE00 on the Kodak test images and the iPhone DNGs (p99 0.40). The cube is now always P3, and the fixture carries the sRGB print of every sample, which the
 Swift core, the web port and the WebGL canvas path reproduce.
 
 ### Spatial stages — approximation grounded in the process
@@ -296,6 +347,30 @@ Swift core, the web port and the WebGL canvas path reproduce.
 * **Halation / glow**: available, off by default. We found no evidence that it is characteristic of
   three-strip prints rather than of individual cinematographers' diffusion.
 * **Grain**: none. Dye images are grainless; adding grain would be a generic "vintage" gesture.
+
+## What the evidence says next
+
+Changes the period evidence argues for that this model has not made yet, each a look change to be
+judged on reference frames before it ships:
+
+* **The key's record, strength and era.** Printed "from any of the three negatives, or occasionally
+  from a combination of two of them" (*Kinematograph Weekly*, 1937), "thin" and coupled to the dyes (a
+  keyed print needed less dye), gone from US prints by the 1950s (Cornwell-Clyne 1951; SMPTE 1957),
+  and about 1.4 times denser projected than diffuse (Mees 1935). What it would take: a key weight per
+  record, era presets (1930s on, late-1940s London faint or none, 1950s US none), lower dye D max
+  under a strong key.
+* **Flare proportional to the picture.** f = K × the frame's mean luminance relative to open-gate
+  white, K ≈ 0.06 for uncoated lenses (Jones and Tuttle 1926, measured) and about 0.02–0.03 for coated
+  ones (an estimate from Rayton's per-surface losses, JSMPE 35, 1940). The engine already measures the
+  frame for print timing; off on a phone either way.
+* **A matrix curve with a sharp shoulder** and a toe made by the flash exposure (*The Cine-Technician*,
+  1953; Cornwell-Clyne 1951, p. 463), with the negatives at γ 0.65 (ibid.). This needs a refit of the
+  tone scale with `fit_tone.py`, not a patch: changing ν alone greyed the whites and moved a ColorChecker
+  by about 5 ΔE00 in the research's runs.
+* Smaller: the arc's green excess (Null, Lozier and Joy 1942, whose Figs. 1 and 3 could be digitised
+  into a measured screen spectrum); the screen's absolute luminance for an appearance model; better dye
+  data (the FilmColors raw data, the Technicolor dye test strips measured in M. Sagen's RIT thesis,
+  2015, and dated reference prints in the Academy Film Archive's Technicolor Reference Collection).
 
 ## What we observed while tuning
 
@@ -324,8 +399,28 @@ Swift core, the web port and the WebGL canvas path reproduce.
 
 * J. A. Ball, "The Technicolor Process of Three-Color Cinematography", Academy Technicians Branch
   Technical Bulletin, 31 May 1935; also JSMPE 25(2), Aug 1935, pp. 127–138.
+* FilmColors (University of Zurich, ERC Advanced Grant), *Timeline of Historical Film Colors*,
+  "Technicolor No. IV: Three-strip", https://filmcolors.org/timeline-entry/1301/ — the measured and
+  extracted dye absorbances behind the US 1949 and UK dye sets (figures credited to Giorgio Trumpy).
+* B. Flueckiger, D. Pfluger, G. Trumpy et al., *Investigation of Film Material–Scanner Interaction*
+  (2018), sec. 2.8.2, Fig. 16 (spectrophotometer eigenspectra of the *Samson and Delilah* trailer).
+* A. Cornwell-Clyne, *Colour Cinematography*, 3rd ed. (1951), pp. 463–467 (negative gamma, matrix
+  exposure, the key, dye recipes and their British and American equivalents).
+* *Kinematograph Weekly*, 23 Jan. 1937, reprinted in *The Cine-Technician*, April–May 1937, pp. 38–40
+  (the key printed from any record or a pair); *The Cine-Technician*, Nov. 1953 (the matrix curve).
+* H. T. Kalmus and A. Rackett, discussion of "Technicolor Adventures in Cinemaland", JSMPE 31 (1938),
+  p. 585; SMPTE, *Elements of Color in Professional Motion Pictures* (1957), p. 30.
+* C. E. K. Mees, JSMPE 24 (1935), p. 294 (Callier Q ≈ 1.4); L. A. Jones and C. Tuttle, "The Effect of
+  Projection Lens Flare upon the Contrast of a Motion Picture Image", Trans. SMPE 25 (1926); Tuttle,
+  Farnham and Rayton, discussion, JSMPE 35 (1940), pp. 93–95; "Flicker in 16-mm Picture Projection",
+  JSMPE 39 (1942), p. 237.
+* M. R. Null, W. W. Lozier, D. B. Joy, "The Color of Light on the Projection Screen", JSMPE 38 (1942),
+  pp. 219–228; screen brightness: JSMPE 35 (1940), p. 95, and Zavesky, JSMPE 50 (1948).
+* C. Ruivo, "Three-Color Technicolor", *Film Atlas* (2024); R. W. Haines, *Film Atlas*; George Eastman
+  Museum, "Dye-Transfer Printing" (dye blends and their changes).
 * B. Flueckiger, *Timeline of Historical Film Colors*, entry "Technicolor No. IV: Three-strip".
-* Wikipedia, "Technicolor" and "Dye-transfer process".
+* Wikipedia, "Technicolor" and "Dye-transfer process" (its key-image figures, "50 %" and 1944, are
+  uncited and are not used).
 * R. W. G. Hunt, *The Reproduction of Colour* (dye unwanted absorptions, subtractive reproduction).
 * Apple, *CIRAWFilter* documentation; WWDC21 session 10160; *Capturing photos in RAW and Apple ProRAW formats*.
 * CIE 2019, "Colour-matching functions of CIE 1931 standard colorimetric observer", International

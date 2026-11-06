@@ -214,8 +214,8 @@ class EngineParams:
     mat_gamma: float = 3.2176
     mat_log_e0: float = -1.0621# log10 printing exposure at half density
     mat_nu: float = 0.0253
-    # silver key image printed from the green record (used c. 1932–1944)
-    key_strength: float = 0.15                 # 0 = none (post-1944 print), 1 = full documented '50 %' image
+    # silver key image, printed here from the green record (its record, strength and era: docs/COLOR_SCIENCE.md)
+    key_strength: float = 0.15                 # 0 = none, 1 = the model's full key (period sources call it 'thin')
     key_dmax: float = 1.10
     key_gamma: float = 0.9
     key_log_e0: float = -1.05
@@ -226,9 +226,9 @@ class EngineParams:
     # viewing
     projector_cct: float = 5400.0              # carbon arc ~ daylight-ish; adapted away, only 2nd-order effects remain
     surround_exponent: float = 0.92            # dark-surround print viewed on a bright-surround phone
-    # Screen flare: stray light added to the projected image as a fraction of screen white. Ball (1935)
-    # gives the projected contrast 'from whitest white to blackest black' as about 1 to 64, i.e. 1/64.
-    # Off by default: a phone is not a 1935 projection (see docs/COLOR_SCIENCE.md).
+    # Screen flare: stray light added to the projected image as a fixed fraction of screen white. Ball's (1935)
+    # 'about 1 to 64' is a general remark; measured lens flare was about 0.06 x the frame's mean transmission
+    # (Jones & Tuttle 1926). Off by default: a phone is not a projection (see docs/COLOR_SCIENCE.md).
     screen_flare: float = 0.0
     # print timing: nudge the printer light so the scene's geometric-mean luminance approaches the target
     timing_strength: float = 0.6
