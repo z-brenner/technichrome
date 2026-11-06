@@ -46,17 +46,41 @@ public struct DyeLUT: Sendable {
 }
 
 public enum LUTBuilder {
-    /// Build the dye LUT for the given parameters. 33³ takes a few ms; 65³ ≈ 50 ms on a phone.
+    /// Build the dye LUT for the given parameters.
+    ///
+    /// The print's transmittance factorises per dye, 10^−(d_c·a_c(λ) + d_m·a_m(λ) + d_y·a_y(λ) + Dmin) =
+    /// T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so three tables of `dimension` × wavelengths transmittances are computed
+    /// once and every entry is a sum of products: 3·dimension·71 `pow` calls instead of 71·dimension³. The
+    /// result equals `PrintModel.displayLinear` + `softClipGamut` evaluated at every node (the core tests check
+    /// it to 1e-6). Measured in a release build on a shared x86 Linux machine, not on a phone: 33³ in about 3 ms
+    /// and 65³ in about 23 ms, where evaluating every node directly took about 29 ms and 250 ms.
     public static func build(parameters p: EngineParameters, dimension: Int = 33, displaySpace: PrintModel.DisplaySpace = .displayP3) -> DyeLUT {
         let model = PrintModel(parameters: p, displaySpace: displaySpace)
-        var data = [Float](repeating: 0, count: dimension * dimension * dimension * 4)
+        let samples = Spectral.sampleCount
         let n = Double(dimension - 1)
+        /// 10^−(j/n · Dmax · a(λᵢ)) for dye `k`, node j major.
+        func transmittances(_ k: Int) -> [Double] {
+            var t = [Double](repeating: 0, count: dimension * samples)
+            for j in 0..<dimension {
+                let d = Double(j) / n * p.dyeDMax[k]
+                for i in 0..<samples { t[j * samples + i] = pow(10.0, -d * model.absorbances[k][i]) }
+            }
+            return t
+        }
+        let tc = transmittances(0), tm = transmittances(1), ty = transmittances(2)
+        // The lamp through the clear base, seen by the observer, relative to the print white.
+        let base = pow(10.0, -model.printDMin) * model.whiteScale
+        let light = (0..<samples).map { Spectral.cmfTable[$0] * (model.projector[$0] * base) }
+        var data = [Float](repeating: 0, count: dimension * dimension * dimension * 4)
+        var throughMY = [SIMD3<Double>](repeating: .zero, count: samples)   // the light through magenta and yellow
         var idx = 0
         for b in 0..<dimension {          // yellow
             for g in 0..<dimension {      // magenta
+                for i in 0..<samples { throughMY[i] = light[i] * (tm[g * samples + i] * ty[b * samples + i]) }
                 for r in 0..<dimension {  // cyan
-                    let d = SIMD3(Double(r) / n * p.dyeDMax[0], Double(g) / n * p.dyeDMax[1], Double(b) / n * p.dyeDMax[2])
-                    let rgb = PrintModel.softClipGamut(model.displayLinear(dyeDensities: d))
+                    var xyz = SIMD3<Double>(repeating: 0)
+                    for i in 0..<samples { xyz += throughMY[i] * tc[r * samples + i] }
+                    let rgb = PrintModel.softClipGamut(model.xyzToDisplay * xyz)
                     data[idx] = Float(rgb.x); data[idx + 1] = Float(rgb.y); data[idx + 2] = Float(rgb.z); data[idx + 3] = 1
                     idx += 4
                 }

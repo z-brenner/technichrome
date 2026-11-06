@@ -122,7 +122,7 @@ export class GLEngine {
       }
     } catch { p3 = false; }
     this.supportsP3Canvas = p3;
-    this.separate = this.compile(SEPARATE_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uSepR', 'uSepG', 'uSepB', 'uNeg', 'uNegShape', 'uMat', 'uDyeDMax', 'uDyeGain', 'uDyeLight', 'uDyeMask', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
+    this.separate = this.compile(SEPARATE_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uSepR', 'uSepG', 'uSepB', 'uNeg', 'uNegShape', 'uMatA', 'uMat', 'uDyeDMax', 'uDyeGain', 'uDyeLight', 'uDyeMask', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
     this.blur = this.compile(BLUR_FRAG, ['uImage', 'uAxis', 'uWeights', 'uRadius']);
     this.print = this.compile(PRINT_FRAG, ['uDensities', 'uSource', 'uCube', 'uCubeDim', 'uEncoded', 'uExposureScale', 'uSepG', 'uNeg', 'uNegShape', 'uKey', 'uKeyNu', 'uSurround', 'uFlare', 'uOutput', 'uP3ToSRGB', 'uUVOrigin', 'uUVScale', 'uWindowOrigin', 'uShift', 'uGlow', 'uBloomAmount', 'uGlowOrigin', 'uGlowFull']);
     this.plain = this.compile(PLAIN_FRAG, ['uSource', 'uEncoded', 'uExposureScale', 'uOutput', 'uSRGBToP3', 'uUVOrigin', 'uUVScale']);
@@ -386,7 +386,7 @@ export class GLEngine {
 
     // Pass 1: densities at the source's resolution.
     const neg = new CharacteristicCurve(p.negative);
-    const mat = new CharacteristicCurve(matrixCurve(p, 0));
+    const mats = [0, 1, 2].map((i) => new CharacteristicCurve(matrixCurve(p, i)));   // a depends on each dye's D max
     const key = new CharacteristicCurve(p.key);
     const l10 = Math.log10(2);
     const dens = this.scratch(0, sw, sh);
@@ -401,7 +401,8 @@ export class GLEngine {
     gl.uniform3fv(u.uSepB, mat3.row(p.separationMatrix, 2));
     gl.uniform4f(u.uNeg, neg.a, neg.logE0, neg.dMin, neg.span);
     gl.uniform2f(u.uNegShape, neg.xHalf, neg.nu);
-    gl.uniform4f(u.uMat, mat.a, mat.logE0, mat.xHalf, mat.nu);
+    gl.uniform3f(u.uMatA, mats[0].a, mats[1].a, mats[2].a);
+    gl.uniform3f(u.uMat, mats[0].logE0, mats[0].xHalf, mats[0].nu);
     gl.uniform3fv(u.uDyeDMax, p.dyeDMax);
     gl.uniform3fv(u.uDyeGain, p.dyeGain);
     gl.uniform3f(u.uDyeLight, p.dyeLightEV[0] * l10, p.dyeLightEV[1] * l10, p.dyeLightEV[2] * l10);
