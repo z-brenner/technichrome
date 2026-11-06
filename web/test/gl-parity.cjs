@@ -1,5 +1,6 @@
 // GPU parity: the WebGL pipeline of the built site must agree with the Python fixture (and therefore the
-// Swift core and the Metal kernels) on the 32 fixture colours, within the same tolerance the app's simulator
+// Swift core and the Metal kernels) on every fixture colour, for the shipped look and each parameter variant the
+// fixture carries (unequal dye D max; lights, flare and no key), within the same tolerance the app's simulator
 // tests use. Serves dist/ with the isolation headers, opens it in headless Chromium, calls the parity hook.
 const { chromium } = require('playwright');
 const http = require('node:http');
@@ -35,15 +36,20 @@ const server = http.createServer((req, res) => {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForFunction(() => typeof window.__technichromeParity === 'function', null, { timeout: 30000 });
-  const inputs = fixture.samples.map((s) => s.input);
-  const outputs = await page.evaluate(([i, p, d]) => window.__technichromeParity(i, p, d), [inputs, fixture.parameters, fixture.lutDimension]);
-  let worst = 0, worstIndex = -1;
-  outputs.forEach((o, i) => {
-    for (let c = 0; c < 3; c++) {
-      const err = Math.abs(o[c] - fixture.samples[i].output[c]);
-      if (err > worst) { worst = err; worstIndex = i; }
-    }
-  });
+  const blocks = [{ name: 'shipped look', parameters: fixture.parameters, samples: fixture.samples }, ...fixture.variants];
+  const results = [];
+  for (const block of blocks) {
+    const inputs = block.samples.map((s) => s.input);
+    const outputs = await page.evaluate(([i, p, d]) => window.__technichromeParity(i, p, d), [inputs, block.parameters, fixture.lutDimension]);
+    let worst = 0, worstIndex = -1;
+    outputs.forEach((o, i) => {
+      for (let c = 0; c < 3; c++) {
+        const err = Math.abs(o[c] - block.samples[i].output[c]);
+        if (err > worst) { worst = err; worstIndex = i; }
+      }
+    });
+    results.push({ block, outputs, worst, worstIndex });
+  }
   // Tiled and windowed rendering must reproduce the whole-image render: a synthetic image printed whole, in 96 px
   // tiles with their blur halo, and as a crop through a window, compared in float.
   const tiled = await page.evaluate(() => window.__technichromeTiledCheck(331, 247, 96));
@@ -57,7 +63,9 @@ const server = http.createServer((req, res) => {
   await browser.close();
   server.close();
   const tolerance = 0.02;
-  console.log(`GPU vs Python fixture: worst error ${worst.toFixed(5)} on sample ${worstIndex} (tolerance ${tolerance}); isolation ok; ${errors.length} page errors`);
+  for (const r of results) console.log(`GPU vs Python fixture (${r.block.name}): worst error ${r.worst.toFixed(5)} on sample ${r.worstIndex} (tolerance ${tolerance})`);
+  console.log(`isolation ok; ${errors.length} page errors`);
+  const parityOk = results.every((r) => r.worst < tolerance);
   const tiledTolerance = 1e-4;
   console.log(`tiled vs whole: ${tiled.tiledVsWhole.toExponential(2)} (print, ${tiled.tiles} tiles, halo ${tiled.halo} px), ${tiled.plainTiledVsWhole.toExponential(2)} (plain); crop vs whole: ${tiled.cropVsWhole.toExponential(2)} (tolerance ${tiledTolerance})`);
   const tiledOk = tiled.tiledVsWhole < tiledTolerance && tiled.plainTiledVsWhole < tiledTolerance && tiled.cropVsWhole < tiledTolerance && tiled.halo > 0 && tiled.tiles === 12;
@@ -72,11 +80,12 @@ const server = http.createServer((req, res) => {
   console.log(`misregistration: a uniform image changes by ${shift.uniform.toExponential(2)} (must be < 0.01), a checkerboard by ${shift.textured.toFixed(3)} (must be > 0.001)`);
   const shiftOk = shift.uniform < 0.01 && shift.textured > 0.001;
   if (!shiftOk) console.log('misregistration moved a uniform image, or did nothing to a textured one');
-  if (!(worst < tolerance)) {
-    for (let i = 0; i < Math.min(6, outputs.length); i++) {
-      console.log(`  sample ${i} input ${JSON.stringify(inputs[i])} gpu ${outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${fixture.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
+  for (const r of results.filter((r) => !(r.worst < tolerance))) {
+    console.log(`${r.block.name} does not match the fixture:`);
+    for (let i = 0; i < Math.min(6, r.outputs.length); i++) {
+      console.log(`  sample ${i} input ${JSON.stringify(r.block.samples[i].input)} gpu ${r.outputs[i].map((v) => v.toFixed(4)).join(',')} expected ${r.block.samples[i].output.map((v) => v.toFixed(4)).join(',')}`);
     }
   }
   if (errors.length) console.log(errors.join('\n'));
-  if (!(worst < tolerance) || !tiledOk || !spatialOk || !bloomOk || !shiftOk || errors.length) process.exit(1);
+  if (!parityOk || !tiledOk || !spatialOk || !bloomOk || !shiftOk || errors.length) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });

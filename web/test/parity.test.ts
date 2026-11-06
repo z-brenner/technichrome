@@ -1,5 +1,6 @@
 // The web engine must agree with the Python prototype (and therefore the Swift core, which is tested against
-// the same fixture) on the 32 fixture colours: dye densities, key density and the developed output.
+// the same fixture) on every fixture colour: dye densities, key density and the developed output, for the shipped
+// look and for each parameter variant the fixture carries (unequal dye D max; lights, flare and no key).
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -9,25 +10,29 @@ import { timingExposureEV, geometricMeanLuminance } from '../src/engine/timing';
 import { dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, SRGB_TO_XYZ, P3_TO_SRGB, SRGB_TO_P3 } from '../src/engine/spectral';
 import { type DisplaySpace, PrintModel, buildLUT, lookupLUT, softClipGamut } from '../src/engine/printModel';
 
+interface Sample { input: number[]; dye: number[]; key: number; output: number[] }
 interface Fixture {
   parameters: EngineParameters;
   lutDimension: number;
   displaySpace: string;
-  samples: { input: number[]; dye: number[]; key: number; output: number[] }[];
+  samples: Sample[];
+  variants: { name: string; parameters: EngineParameters; samples: Sample[] }[];
 }
 
 const fixturePath = fileURLToPath(new URL('../../Tests/TechnichromeCoreTests/Fixtures/parity.json', import.meta.url));
 const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as Fixture;
+const blocks = [{ name: 'shipped look', parameters: fixture.parameters, samples: fixture.samples }, ...fixture.variants];
 
 describe('parity with the Python prototype', () => {
   it('ships the same parameters as the fixture', () => {
     expect(TECHNICHROME_V1).toEqual(fixture.parameters);
+    expect(fixture.variants.map((v) => v.name)).toEqual(['unequal dye D max', 'printer lights, screen flare, no key']);
   });
 
-  it('reproduces dye densities, key density and output on every fixture sample', () => {
-    const pipe = new ReferencePipeline(fixture.parameters, fixture.lutDimension, fixture.displaySpace === 'p3' ? 'displayP3' : 'sRGB');
+  it.each(blocks.map((b) => [b.name, b] as const))('reproduces dye densities, key density and output on every fixture sample (%s)', (name, block) => {
+    const pipe = new ReferencePipeline(block.parameters, fixture.lutDimension, fixture.displaySpace === 'p3' ? 'displayP3' : 'sRGB');
     let worst = 0;
-    for (const s of fixture.samples) {
+    for (const s of block.samples) {
       const { dye, key } = pipe.densities(s.input as [number, number, number]);
       const out = pipe.develop(s.input as [number, number, number]);
       for (let c = 0; c < 3; c++) {
@@ -37,7 +42,7 @@ describe('parity with the Python prototype', () => {
       }
       expect(Math.abs(key - s.key)).toBeLessThan(1e-7);
     }
-    console.log(`max |web - Python| output error: ${worst.toExponential(2)}`);
+    console.log(`max |web - Python| output error (${name}): ${worst.toExponential(2)}`);
   });
 
   it('keeps greys neutral and monotonic, and prints a saturated red dark and red', () => {

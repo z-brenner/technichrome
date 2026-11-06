@@ -27,8 +27,23 @@ public enum EngineSelfTest {
         SIMD3(0, 0, 0), SIMD3(0.9, 0.02, 0.6), SIMD3(0.7, 0.7, 0.2), SIMD3(0.1, 0.4, 0.5), SIMD3(0.33, 0.1, 0.5), SIMD3(2.5, 0.2, 0.1),
     ]
 
+    /// Checks the look in use, then the same look with three different dye D max: each dye's matrix curve has
+    /// its own steepness, which a look whose D max are equal (the shipped one) does not exercise.
     public static func run(engine: TechnichromeEngine, parameters: EngineParameters) -> EngineSelfTestResult {
         let context = CIContext.technichrome()
+        var unequal = parameters
+        unequal.dyeDMax = [3.1, 2.6, 2.3]
+        let look = worstError(engine: engine, context: context, parameters: parameters)
+        let varied = worstError(engine: engine, context: context, parameters: unequal)
+        let worst = max(look.error, varied.error)
+        let passed = worst < tolerance
+        let detail = String(format: "max |GPU − reference| = %.4f on sample %d, %.4f on sample %d with unequal dye D max (tolerance %.2f)",
+                            look.error, look.index, varied.error, varied.index, tolerance)
+        return EngineSelfTestResult(worstError: worst, sampleCount: samples.count, passed: passed, detail: detail)
+    }
+
+    /// Renders the samples through the GPU engine and the CPU reference: the worst channel error and its sample.
+    static func worstError(engine: TechnichromeEngine, context: CIContext, parameters: EngineParameters) -> (error: Double, index: Int) {
         let reference = ReferencePipeline(parameters: parameters, lutDimension: engine.lutDimension, displaySpace: .displayP3)
         var floats: [Float] = []
         for v in samples { floats += [Float(v.x), Float(v.y), Float(v.z), 1] }
@@ -51,8 +66,6 @@ public enum EngineSelfTest {
                 if err > worst { worst = err; worstIndex = i }
             }
         }
-        let passed = worst < tolerance
-        let detail = String(format: "max |GPU − reference| = %.4f on sample %d (tolerance %.2f)", worst, worstIndex, tolerance)
-        return EngineSelfTestResult(worstError: worst, sampleCount: samples.count, passed: passed, detail: detail)
+        return (worst, worstIndex)
     }
 }

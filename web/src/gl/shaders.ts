@@ -87,7 +87,8 @@ uniform float uExposureScale;
 uniform vec3 uSepR, uSepG, uSepB;
 uniform vec4 uNeg;        // a, logE0, dMin, span
 uniform vec2 uNegShape;   // xHalf, nu
-uniform vec4 uMat;        // a, logE0, xHalf, nu
+uniform vec3 uMatA;       // a of each dye's matrix curve (it depends on that dye's D max)
+uniform vec3 uMat;        // logE0, xHalf, nu, shared by the three matrix curves
 uniform vec3 uDyeDMax, uDyeGain, uDyeLight, uDyeMask;
 uniform sampler2D uGlow;     // halation: the glow field of the whole image (unused when uBloomAmount is 0)
 uniform float uBloomAmount;
@@ -105,9 +106,9 @@ void main() {
   dn.z = tcCurve(logS.z, uNeg.x, uNeg.y, uNeg.z, uNeg.w, uNegShape.x, uNegShape.y);
   vec3 logPrint = -dn + uDyeLight;
   vec3 dye;
-  dye.x = tcCurve(logPrint.x, uMat.x, uMat.y, 0.0, uDyeDMax.x, uMat.z, uMat.w) * uDyeGain.x / uDyeDMax.x;
-  dye.y = tcCurve(logPrint.y, uMat.x, uMat.y, 0.0, uDyeDMax.y, uMat.z, uMat.w) * uDyeGain.y / uDyeDMax.y;
-  dye.z = tcCurve(logPrint.z, uMat.x, uMat.y, 0.0, uDyeDMax.z, uMat.z, uMat.w) * uDyeGain.z / uDyeDMax.z;
+  dye.x = tcCurve(logPrint.x, uMatA.x, uMat.x, 0.0, uDyeDMax.x, uMat.y, uMat.z) * uDyeGain.x / uDyeDMax.x;
+  dye.y = tcCurve(logPrint.y, uMatA.y, uMat.x, 0.0, uDyeDMax.y, uMat.y, uMat.z) * uDyeGain.y / uDyeDMax.y;
+  dye.z = tcCurve(logPrint.z, uMatA.z, uMat.x, 0.0, uDyeDMax.z, uMat.y, uMat.z) * uDyeGain.z / uDyeDMax.z;
   dye = clamp(dye, 0.0, 1.0) * uDyeMask;
   outColor = vec4(dye, 1.0);
 }`;

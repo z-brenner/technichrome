@@ -1,5 +1,6 @@
 """Export (a) the engine parameters in the Swift EngineParameters JSON schema and (b) a parity fixture
-(inputs → dye densities, key density, outputs) so the Swift unit tests can verify the port.
+(inputs → dye densities, key density, outputs) so the Swift unit tests can verify the port: one block for the
+shipped look and one for each parameter variant in VARIANTS, on the same inputs.
 
 usage: python3 export_fixtures.py ../../Tests/TechnichromeCoreTests/Fixtures/parity.json
 """
@@ -60,21 +61,52 @@ def swift_literal(eng: T.Engine):
     return "\n".join(out)
 
 
-if __name__ == '__main__':
-    eng = T.Engine(lut_size=17)
+# Parameter sets every implementation is checked on besides the shipped look, one fixture block each: three
+# different dye D max, so that each matrix curve has its own steepness (the shipped look's three are equal),
+# and printer lights with screen flare and no key (the set the app's GPU tests also run).
+VARIANTS = [
+    ("unequal dye D max", {"dye_dmax": (3.1, 2.6, 2.3)}),
+    ("printer lights, screen flare, no key", {"dye_light_ev": (0.3, -0.1, 0.15), "screen_flare": 1.0 / 64.0, "key_strength": 0.0}),
+]
+
+
+def fixture_inputs():
     rng = np.random.default_rng(3)
     inputs = [[1, 1, 1], [0.18, 0.18, 0.18], [0.02, 0.02, 0.02], [3.0, 3.0, 3.0], [0.42, 0.04, 0.045], [0.05, 0.3, 0.06],
               [0.04, 0.05, 0.5], [0.6, 0.5, 0.1], [0.5, 0.3, 0.2], [0.2, 0.12, 0.09], [0.0, 0.0, 0.0], [0.9, 0.02, 0.6]]
     inputs += (rng.random((20, 3)) ** 2 * 1.5).tolist()
+    return inputs
+
+
+def variant_engine(overrides):
+    return T.Engine(T.EngineParams(**overrides), lut_size=17)
+
+
+def variant_name(name):
+    return f"Technichrome v1, {name}"
+
+
+def fixture_samples(eng, inputs):
     samples = []
     for inp in inputs:
         a = np.array([inp], dtype=np.float64)
         norm, key = eng.densities(a)
         out = eng.develop(a)
         samples.append({"input": [float(v) for v in inp], "dye": [float(v) for v in norm[0]], "key": float(key[0]), "output": [float(v) for v in out[0]]})
-    fixture = {"parameters": params_to_swift_json(eng), "lutDimension": 17, "displaySpace": eng.p.display, "samples": samples}
+    return samples
+
+
+if __name__ == '__main__':
+    eng = T.Engine(lut_size=17)
+    inputs = fixture_inputs()
+    samples = fixture_samples(eng, inputs)
+    variants = []
+    for name, overrides in VARIANTS:
+        ve = variant_engine(overrides)
+        variants.append({"name": name, "parameters": params_to_swift_json(ve, name=variant_name(name)), "samples": fixture_samples(ve, inputs)})
+    fixture = {"parameters": params_to_swift_json(eng), "lutDimension": 17, "displaySpace": eng.p.display, "samples": samples, "variants": variants}
     path = sys.argv[1] if len(sys.argv) > 1 else 'parity.json'
     json.dump(fixture, open(path, 'w'), indent=1)
-    print('wrote', path, len(samples), 'samples')
+    print('wrote', path, len(samples), 'samples for the shipped look and for each of', len(variants), 'variants')
     if '--swift' in sys.argv:
         print(swift_literal(eng))

@@ -37,10 +37,12 @@ final class EngineGPUParityTests: XCTestCase {
         SIMD3(0, 0, 0), SIMD3(0.9, 0.02, 0.6), SIMD3(0.7, 0.7, 0.2), SIMD3(0.1, 0.4, 0.5), SIMD3(0.33, 0.1, 0.5), SIMD3(2.5, 0.2, 0.1),
     ]
 
-    func testGPUEngineMatchesCPUReference() throws {
+    /// Renders the samples through the GPU engine and the CPU reference with `params`, checks every channel and
+    /// prints the worst error (the CI log keeps it, so the tolerance can follow what the simulator measures).
+    @discardableResult
+    func checkGPUAgainstReference(_ params: EngineParameters, _ label: String) throws -> Double {
         let engine = try TechnichromeEngine(lutDimension: 33)
         let context = CIContext.technichrome()
-        let params = EngineParameters.default
         let reference = ReferencePipeline(parameters: params, lutDimension: 33, displaySpace: .displayP3)
         let input = makeImage(samples)
         let output = engine.makeImage(from: input, parameters: params, exposureScale: 1, longEdge: Double(samples.count), spatial: false)
@@ -52,31 +54,33 @@ final class EngineGPUParityTests: XCTestCase {
             for c in 0..<3 {
                 let err = abs(pixels[i][c] - expected[c])
                 worst = max(worst, err)
-                XCTAssertEqual(pixels[i][c], expected[c], accuracy: 0.02, "sample \(i) \(s) channel \(c): GPU \(pixels[i]) vs reference \(expected)")
+                XCTAssertEqual(pixels[i][c], expected[c], accuracy: 0.02, "\(label): sample \(i) \(s) channel \(c): GPU \(pixels[i]) vs reference \(expected)")
             }
         }
-        print("GPU vs CPU reference worst error: \(worst)")
+        print("GPU vs CPU reference worst error (\(label)): \(worst)")
+        return worst
+    }
+
+    func testGPUEngineMatchesCPUReference() throws {
+        try checkGPUAgainstReference(.default, "shipped look")
     }
 
     func testGPUEngineMatchesCPUReferenceWithLightsFlareAndNoKey() throws {
         // Exercises the per-matrix light path, the screen-flare term of the print kernel and a key-less
         // (post-1944) print.
-        let engine = try TechnichromeEngine(lutDimension: 33)
-        let context = CIContext.technichrome()
         var params = EngineParameters.default
         params.dyeLightEV = [0.3, -0.1, 0.15]
         params.keyStrength = 0
         params.screenFlare = 1.0 / 64.0
-        let reference = ReferencePipeline(parameters: params, lutDimension: 33, displaySpace: .displayP3)
-        let input = makeImage(samples)
-        let output = engine.makeImage(from: input, parameters: params, exposureScale: 1, longEdge: Double(samples.count), spatial: false)
-        let pixels = readPixels(output, context: context, count: samples.count)
-        for (i, s) in samples.enumerated() {
-            let expected = ColorSpaces.p3ToSRGB * reference.develop(sceneLinear: s)
-            for c in 0..<3 {
-                XCTAssertEqual(pixels[i][c], expected[c], accuracy: 0.02, "sample \(i) \(s) channel \(c)")
-            }
-        }
+        try checkGPUAgainstReference(params, "lights, flare, no key")
+    }
+
+    func testGPUEngineMatchesCPUReferenceWithUnequalDyeDMax() throws {
+        // Each dye's matrix curve has its own steepness (it depends on that dye's D max); the shipped look's three
+        // D max are equal, so only a look like this one shows whether the kernel gets each dye's own.
+        var params = EngineParameters.default
+        params.dyeDMax = [3.1, 2.6, 2.3]
+        try checkGPUAgainstReference(params, "unequal dye D max")
     }
 
     func testMisregistrationLeavesUniformImageUnchanged() throws {
