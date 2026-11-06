@@ -75,6 +75,9 @@ def fixture_inputs():
     inputs = [[1, 1, 1], [0.18, 0.18, 0.18], [0.02, 0.02, 0.02], [3.0, 3.0, 3.0], [0.42, 0.04, 0.045], [0.05, 0.3, 0.06],
               [0.04, 0.05, 0.5], [0.6, 0.5, 0.1], [0.5, 0.3, 0.2], [0.2, 0.12, 0.09], [0.0, 0.0, 0.0], [0.9, 0.02, 0.6]]
     inputs += (rng.random((20, 3)) ** 2 * 1.5).tolist()
+    # Colours outside sRGB, as a wide-gamut RAW delivers them (a negative component): the separation applies to
+    # them unclamped, and every implementation must agree on that.
+    inputs += [[-0.05, 0.4, 0.5], [0.6, -0.02, 0.05]]
     return inputs
 
 

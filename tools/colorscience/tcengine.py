@@ -4,7 +4,7 @@ tcengine.py — reference implementation of the Technichrome "imbibition model".
 Pipeline (per pixel, scene-linear sRGB-primaries RGB in, display-linear RGB out):
 
   1. exposure            E  = rgb * 2^ev                                 (scene-linear)
-  2. three-strip camera  S  = M_sep @ E                                   (separation exposures, white = 1)
+  2. three-strip camera  S  = M_sep @ E                                   (separation exposures, white = 1, floored at 1e-6)
   3. negatives           Dn = hd_curve(log10 S)                           (silver density, three B&W negatives)
   4. matrices + dyes     Dd = dye_curve(log10(10^-Dn))                    (dye density transferred per matrix)
   5. key image           Dk = key_curve(log10(10^-Dn_green)) * key        (silver positive from the green record)
@@ -349,9 +349,13 @@ class Engine:
 
     # --- per-pixel analytic part ---------------------------------------------------------
     def densities(self, rgb_linear):
-        """Scene-linear sRGB-primaries RGB → (dye densities normalised to [0,1] (...,3), key density (...))."""
+        """Scene-linear sRGB-primaries RGB → (dye densities normalised to [0,1] (...,3), key density (...)).
+
+        The separation matrix applies to the scene as it is: a negative component only means the colour lies
+        outside sRGB (a wide-gamut RAW colour), not that it is impossible. The record exposures, which cannot be
+        negative, are floored before the log; clamping each scene channel first would clip the colour to sRGB."""
         p = self.p
-        E = np.maximum(rgb_linear, 0.0) * (2.0 ** p.exposure_ev)
+        E = np.asarray(rgb_linear, dtype=np.float64) * (2.0 ** p.exposure_ev)
         Ssep = S.apply_matrix(self.M_sep, E)
         log_s = np.log10(np.maximum(Ssep, 1e-6))
         Dn = self.neg.density(log_s)

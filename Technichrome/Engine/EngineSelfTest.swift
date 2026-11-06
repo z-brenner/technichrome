@@ -25,6 +25,8 @@ public enum EngineSelfTest {
         SIMD3(1, 1, 1), SIMD3(0.18, 0.18, 0.18), SIMD3(0.02, 0.02, 0.02), SIMD3(3, 3, 3), SIMD3(0.42, 0.04, 0.045),
         SIMD3(0.05, 0.3, 0.06), SIMD3(0.04, 0.05, 0.5), SIMD3(0.6, 0.5, 0.1), SIMD3(0.5, 0.3, 0.2), SIMD3(0.2, 0.12, 0.09),
         SIMD3(0, 0, 0), SIMD3(0.9, 0.02, 0.6), SIMD3(0.7, 0.7, 0.2), SIMD3(0.1, 0.4, 0.5), SIMD3(0.33, 0.1, 0.5), SIMD3(2.5, 0.2, 0.1),
+        // Colours outside sRGB, as a wide-gamut RAW delivers them: the separation applies to them unclamped.
+        SIMD3(-0.05, 0.4, 0.5), SIMD3(0.6, -0.02, 0.05),
     ]
 
     /// Checks the look in use, then the same look with three different dye D max: each dye's matrix curve has

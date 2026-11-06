@@ -24,7 +24,9 @@ export class ReferencePipeline {
   /** Scene-linear sRGB-primaries RGB → normalised dye densities and key density. */
   densities(rgb: Vec3, exposureScale = Math.pow(2, this.parameters.exposureEV)): { dye: Vec3; key: number } {
     const p = this.parameters;
-    const e: Vec3 = [Math.max(rgb[0], 0) * exposureScale, Math.max(rgb[1], 0) * exposureScale, Math.max(rgb[2], 0) * exposureScale];
+    // The separation applies to the scene as it is: a negative component is a colour outside sRGB (wide-gamut RAW),
+    // not an impossible one. The record exposures cannot be negative and are floored before the log.
+    const e: Vec3 = [rgb[0] * exposureScale, rgb[1] * exposureScale, rgb[2] * exposureScale];
     const s = mat3.apply(p.separationMatrix, e);
     const logS = s.map((v) => Math.log10(Math.max(v, 1e-6)));
     const dn = logS.map((v) => this.negative.density(v));

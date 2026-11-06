@@ -30,9 +30,12 @@ static inline float tc_curve(float logE, float a, float logE0, float dMin, float
     return dMin + span * g;
 }
 
+/// The scene plus the halation glow, times the exposure. The scene is not clamped: a negative component is a
+/// colour outside sRGB (wide-gamut RAW), and the separation applies to it as it is; the record exposures are
+/// floored before the log (see ReferencePipeline.densities). The glow, a highlight excess, is clamped.
 static inline float3 tc_scene_exposure(float3 src, float3 glow, float bloomAmount, float exposureScale)
 {
-    float3 e = max(src, 0.0f) + bloomAmount * max(glow, 0.0f);
+    float3 e = src + bloomAmount * max(glow, 0.0f);
     return e * exposureScale;
 }
 

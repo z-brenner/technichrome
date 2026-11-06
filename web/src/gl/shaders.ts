@@ -53,11 +53,12 @@ vec3 sceneLinear(sampler2D src, vec2 uv, int encoded, float exposureScale) {
 vec3 glowAt(sampler2D glow, ivec2 position, vec2 fullSize) {
   return max(texture(glow, (vec2(position) + 0.5) / fullSize).rgb, vec3(0.0));
 }
-// tc_scene_exposure: the scene plus the glow, times the exposure.
+// tc_scene_exposure: the scene plus the glow, times the exposure. The scene is not clamped (the separation applies to
+// a colour outside sRGB as it is; the records are floored before the log); the glow is.
 vec3 sceneExposure(sampler2D src, vec2 uv, int encoded, float exposureScale, sampler2D glow, float bloomAmount, ivec2 position, vec2 fullSize) {
   vec3 s = texture(src, uv).rgb;
   if (encoded == 1) s = srgbDecode(s);
-  vec3 e = max(s, vec3(0.0));
+  vec3 e = s;
   if (bloomAmount > 0.0) e += bloomAmount * glowAt(glow, position, fullSize);
   return e * exposureScale;
 }
