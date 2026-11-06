@@ -7,7 +7,7 @@ import { ReferencePipeline } from '../src/engine/reference';
 import { TECHNICHROME_V1, parametersFromJSON, type EngineParameters } from '../src/engine/parameters';
 import { timingExposureEV, geometricMeanLuminance } from '../src/engine/timing';
 import { dcrawGamma, librawGammaDecode, librawGammaEncode, srgbDecode, srgbEncode, mat3, SRGB_TO_XYZ, P3_TO_SRGB, SRGB_TO_P3 } from '../src/engine/spectral';
-import { buildLUT, lookupLUT } from '../src/engine/printModel';
+import { type DisplaySpace, PrintModel, buildLUT, lookupLUT, softClipGamut } from '../src/engine/printModel';
 
 interface Fixture {
   parameters: EngineParameters;
@@ -109,6 +109,24 @@ describe('transfer functions and matrices', () => {
     const lut = buildLUT(TECHNICHROME_V1, 9);
     expect(Math.min(...lookupLUT(lut, [0, 0, 0]))).toBeGreaterThan(0.93);
     expect(Math.max(...lookupLUT(lut, [1, 1, 1]))).toBeLessThan(0.02);
+  });
+
+  it('bakes the factorised cube equal to the print model evaluated at every node', () => {
+    const worstNode = (p: EngineParameters, dim: number, space: DisplaySpace) => {
+      const lut = buildLUT(p, dim, space);
+      const model = new PrintModel(p, space);
+      const n = dim - 1;
+      let worst = 0;
+      for (let b = 0; b < dim; b++) for (let g = 0; g < dim; g++) for (let r = 0; r < dim; r++) {
+        const direct = softClipGamut(model.displayLinear([r / n * p.dyeDMax[0], g / n * p.dyeDMax[1], b / n * p.dyeDMax[2]]));
+        const i = ((b * dim + g) * dim + r) * 4;
+        for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(lut.data[i + c] - direct[c]));
+      }
+      return worst;
+    };
+    expect(worstNode(TECHNICHROME_V1, 17, 'displayP3')).toBeLessThan(1e-6);
+    // Three different D max (each dye its own transmittance table), another lamp, the sRGB cube.
+    expect(worstNode({ ...TECHNICHROME_V1, dyeDMax: [3.1, 2.6, 2.3], projectorCCT: 4800, printDMin: 0.1 }, 9, 'sRGB')).toBeLessThan(1e-6);
   });
 });
 

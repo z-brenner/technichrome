@@ -1,6 +1,7 @@
 // The "virtual dye-transfer print": three dyes with spectral absorbances, a neutral base density, a projector
-// lamp, the CIE observer and chromatic adaptation of the screen white to the display. Evaluated once per LUT
-// entry, never per pixel. Port of PrintModel.swift and LUTBuilder.swift.
+// lamp, the CIE observer and chromatic adaptation of the screen white to the display. Baked into the dye cube
+// (factorised per dye), never evaluated per pixel; `xyz` is the direct evaluation the bake is tested against.
+// Port of PrintModel.swift and LUTBuilder.swift.
 
 import { type EngineParameters, absorbance } from './parameters';
 import { CMF_TABLE, SAMPLE_COUNT, D65, type Mat3, type Vec3, asymmetricGaussian, bradfordAdaptation, mat3, planck, xyToXYZ, xyzOf, XYZ_TO_P3, XYZ_TO_SRGB } from './spectral';
@@ -61,15 +62,47 @@ export function softClipGamut(rgb: Vec3): Vec3 {
 /** The baked dye cube: dimension³ × RGBA float32, red (cyan) fastest, then green (magenta), then blue (yellow). */
 export interface DyeLUT { dimension: number; data: Float32Array }
 
+/** Bakes the cube, factorised per dye as LUTBuilder.swift does: 10^−(d_c·a_c(λ) + d_m·a_m(λ) + d_y·a_y(λ) + Dmin)
+ *  = T_c(λ)·T_m(λ)·T_y(λ)·10^−Dmin, so three tables of dimension × wavelengths transmittances replace a power per
+ *  entry and wavelength. Equal at every node to `softClipGamut(model.displayLinear(d))` (the parity test checks it). */
 export function buildLUT(p: EngineParameters, dimension = 33, displaySpace: DisplaySpace = 'displayP3'): DyeLUT {
   const model = new PrintModel(p, displaySpace);
-  const data = new Float32Array(dimension * dimension * dimension * 4);
+  const L = SAMPLE_COUNT;
   const n = dimension - 1;
+  const transmittances = (k: number) => {   // 10^−(j/n · Dmax · a(λ)) for dye k, node j major
+    const a = model.absorbances[k];
+    const t = new Float64Array(dimension * L);
+    for (let j = 0; j < dimension; j++) {
+      const d = j / n * p.dyeDMax[k];
+      for (let i = 0; i < L; i++) t[j * L + i] = Math.pow(10, -d * a[i]);
+    }
+    return t;
+  };
+  const tc = transmittances(0), tm = transmittances(1), ty = transmittances(2);
+  // The lamp through the clear base, seen by the observer, relative to the print white; then through magenta and yellow.
+  const base = Math.pow(10, -model.printDMin) * model.whiteScale;
+  const light = new Float64Array(3 * L);
+  for (let i = 0; i < L; i++) {
+    const s = model.projector[i] * base;
+    light[i] = CMF_TABLE[i][0] * s; light[L + i] = CMF_TABLE[i][1] * s; light[2 * L + i] = CMF_TABLE[i][2] * s;
+  }
+  const through = new Float64Array(3 * L);
+  const data = new Float32Array(dimension * dimension * dimension * 4);
   let idx = 0;
   for (let b = 0; b < dimension; b++) {
     for (let g = 0; g < dimension; g++) {
+      for (let i = 0; i < L; i++) {
+        const t = tm[g * L + i] * ty[b * L + i];
+        through[i] = light[i] * t; through[L + i] = light[L + i] * t; through[2 * L + i] = light[2 * L + i] * t;
+      }
       for (let r = 0; r < dimension; r++) {
-        const rgb = softClipGamut(model.displayLinear([r / n * p.dyeDMax[0], g / n * p.dyeDMax[1], b / n * p.dyeDMax[2]]));
+        let x = 0, y = 0, z = 0;
+        const o = r * L;
+        for (let i = 0; i < L; i++) {
+          const t = tc[o + i];
+          x += through[i] * t; y += through[L + i] * t; z += through[2 * L + i] * t;
+        }
+        const rgb = softClipGamut(mat3.apply(model.xyzToDisplay, [x, y, z]));
         data[idx] = rgb[0]; data[idx + 1] = rgb[1]; data[idx + 2] = rgb[2]; data[idx + 3] = 1;
         idx += 4;
       }

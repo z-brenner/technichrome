@@ -29,6 +29,12 @@ def main():
         out = eng.develop(np.array([s['input']]))[0]
         worst = max(worst, float(np.max(np.abs(out - np.array(s['output'])))))
     assert worst < 1e-6, f"fixture outputs drifted by {worst}"
+    # 2b. the factorised cube equals the print model evaluated directly at every node (+ the soft clip)
+    for p, n in ((T.EngineParams(), 33), (T.EngineParams(dye_dmax=(3.1, 2.6, 2.3), projector_cct=4800.0), 17)):
+        e = T.Engine(p, lut_size=n)
+        direct = T.soft_clip_gamut(e.display_linear_from_densities(e.lut_node_densities(n)))
+        cube_err = float(np.max(np.abs(e.lut - direct)))
+        assert cube_err < 1e-6, f"factorised cube differs from direct evaluation by {cube_err} at {n}³"
     # 3. invariants: neutral stays neutral and monotonic; saturated red stays red and dark
     last = 1e9
     for stop in np.arange(2.0, -8.0, -0.5):

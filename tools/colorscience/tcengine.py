@@ -283,12 +283,22 @@ class Engine:
         return rgb
 
     # --- LUT ---------------------------------------------------------------------------------
-    def build_lut(self, n):
+    def lut_node_densities(self, n):
+        """Absolute dye densities at the nodes of an n³ cube, (n, n, n, 3) indexed [c, m, y]."""
         g = np.linspace(0.0, 1.0, n)
         c, m, y = np.meshgrid(g, g, g, indexing='ij')
-        dens = np.stack([c * self.p.dye_dmax[0], m * self.p.dye_dmax[1], y * self.p.dye_dmax[2]], axis=-1)
-        rgb = self.display_linear_from_densities(dens)
-        return soft_clip_gamut(rgb)  # (n, n, n, 3), indexed [c, m, y]
+        return np.stack([c * self.p.dye_dmax[0], m * self.p.dye_dmax[1], y * self.p.dye_dmax[2]], axis=-1)
+
+    def build_lut(self, n):
+        """The cube, factorised per dye: 10^-(Σ d_i a_i(λ) + Dmin) = T_c(λ) T_m(λ) T_y(λ) 10^-Dmin, so three
+        tables of n × wavelengths transmittances replace a power per entry and wavelength (LUTBuilder.swift and
+        printModel.ts bake the same way). Equal at every node to soft_clip_gamut(display_linear_from_densities(d)),
+        which check_prototype.py asserts."""
+        g = np.linspace(0.0, 1.0, n)
+        T = [10.0 ** (-np.outer(g * self.p.dye_dmax[i], self.A[i])) for i in range(3)]   # (n, wavelengths) per dye
+        w = (self.P * 10.0 ** (-self.p.print_dmin))[:, None] * S.CMF * self.white_scale   # lamp · base · observer
+        xyz = np.einsum('cl,ml,yl,lk->cmyk', T[0], T[1], T[2], w, optimize=True)
+        return soft_clip_gamut(S.apply_matrix(self.xyz_to_display, xyz))  # (n, n, n, 3), indexed [c, m, y]
 
     def lut_lookup(self, norm_dens):
         """Trilinear lookup, norm_dens in [0,1]^3 (..., 3)."""

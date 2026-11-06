@@ -5,7 +5,8 @@
 //  The "virtual dye-transfer print": three dyes with spectral absorbances, a neutral base density,
 //  a projector lamp, the CIE observer, and chromatic adaptation of the screen white to the display.
 //
-//  The model is evaluated once per LUT entry on the CPU (LUTBuilder) — never per pixel.
+//  The model is baked into the dye cube on the CPU (LUTBuilder, factorised per dye) — never evaluated per
+//  pixel. `xyz(dyeDensities:)` is the direct evaluation the bake is tested against.
 //
 
 import Foundation
