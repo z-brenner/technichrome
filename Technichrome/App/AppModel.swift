@@ -70,16 +70,27 @@ final class AppModel {
         }
         camera.captureCompanionHEIF = settings.captureCompanionHEIF
         camera.fullResolutionRAW = settings.fullResolutionRAW
+        prewarmCube(for: parameters)
     }
 
     func saveParametersAsDefault(_ p: EngineParameters) {
         parameters = p
         if let data = try? p.jsonData() { UserDefaults.standard.set(data, forKey: Self.parametersKey) }
+        prewarmCube(for: p)
     }
 
     func resetParameters() {
         parameters = .default
         UserDefaults.standard.removeObject(forKey: Self.parametersKey)
+        prewarmCube(for: .default)
+    }
+
+    /// Bakes the dye cube for the preview's parameters on a background queue (the engine is thread-safe), so
+    /// the live preview's first frame, and the first after "Set as default", finds it baked instead of baking
+    /// it on the main thread.
+    private func prewarmCube(for p: EngineParameters) {
+        guard let engine else { return }
+        Task.detached(priority: .utility) { _ = engine.cubeData(for: p) }
     }
 }
 
